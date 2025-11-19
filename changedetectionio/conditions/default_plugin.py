@@ -7,6 +7,53 @@ from loguru import logger
 hookimpl = pluggy.HookimplMarker("changedetectionio_conditions")
 
 
+def _coerce_float(value):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _extract_number_from_text(text):
+    if not text:
+        return None
+    price = Price.fromstring(text)
+    if price and price.amount is not None:
+        return _coerce_float(price.amount)
+    return None
+
+
+def _extract_previous_number_from_watch(watch):
+    try:
+        keys = list(watch.history.keys())
+    except Exception:
+        return None
+
+    if not keys:
+        return None
+
+    latest_key = keys[-1]
+    try:
+        snapshot_text = watch.get_history_snapshot(latest_key)
+    except Exception as e:
+        logger.debug(f"Unable to read previous snapshot for conditions: {str(e)}")
+        return None
+
+    return _extract_number_from_text(snapshot_text)
+
+
+def _delta_comparison(data, current_value, threshold, expect_increase=True):
+    current = _coerce_float(current_value)
+    previous = _coerce_float((data or {}).get('extracted_number_previous'))
+    limit = _coerce_float(threshold)
+
+    if current is None or previous is None or limit is None:
+        return False
+
+    delta = current - previous
+    return delta > limit if expect_increase else (previous - current) > limit
+
+
 @hookimpl
 def register_operators():
     def starts_with(_, text, prefix):
@@ -34,6 +81,12 @@ def register_operators():
     def not_contains(_, text, pattern):
         return not pattern in text
 
+    def number_increase_more_than(data, current_value, threshold):
+        return _delta_comparison(data, current_value, threshold, expect_increase=True)
+
+    def number_decrease_more_than(data, current_value, threshold):
+        return _delta_comparison(data, current_value, threshold, expect_increase=False)
+
     return {
         "!in": not_contains,
         "!contains_regex": not_contains_regex,
@@ -42,6 +95,8 @@ def register_operators():
         "length_max": length_max,
         "length_min": length_min,
         "starts_with": starts_with,
+        "number_increase_gt": number_increase_more_than,
+        "number_decrease_gt": number_decrease_more_than,
     }
 
 @hookimpl
@@ -54,6 +109,8 @@ def register_operator_choices():
         ("length_max", "Length maximum"),
         ("contains_regex", "Text Matches Regex"),
         ("!contains_regex", "Text Does NOT Match Regex"),
+        ("number_increase_gt", "Has number that increased more than (+Δ >)"),
+        ("number_decrease_gt", "Has number that decreased more than (-Δ >)"),
     ]
 
 @hookimpl
@@ -70,14 +127,17 @@ def register_field_choices():
 def add_data(current_watch_uuid, application_datastruct, ephemeral_data):
 
     res = {}
+    watch = application_datastruct['watching'].get(current_watch_uuid)
     if 'text' in ephemeral_data:
         res['page_filtered_text'] = ephemeral_data['text']
+        current_number = _extract_number_from_text(ephemeral_data.get('text'))
+        if current_number is not None:
+            res['extracted_number'] = current_number
+            logger.debug(f"Extracted number result returning float({res['extracted_number']})")
 
-        # Better to not wrap this in try/except so that the UI can see any errors
-        price = Price.fromstring(ephemeral_data.get('text'))
-        if price and price.amount != None:
-            # This is slightly misleading, it's extracting a PRICE not a Number..
-            res['extracted_number'] = float(price.amount)
-            logger.debug(f"Extracted number result: '{price}' - returning float({res['extracted_number']})")
+    if watch:
+        previous_number = _extract_previous_number_from_watch(watch)
+        if previous_number is not None:
+            res['extracted_number_previous'] = previous_number
 
     return res

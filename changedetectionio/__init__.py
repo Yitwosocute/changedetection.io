@@ -27,6 +27,7 @@ def get_version():
     return __version__
 
 # Parent wrapper or OS sends us a SIGTERM/SIGINT, do everything required for a clean shutdown
+#被注册到 SIGTERM/SIGINT，用于快速而安全地停止服务：设置应用的退出标志、停止后台线程、关闭队列与 Socket.IO 服务，并在退出前进行一次数据同步以避免数据丢失。
 def sigshutdown_handler(_signo, _stack_frame):
     name = signal.Signals(_signo).name
     logger.critical(f'Shutdown: Got Signal - {name} ({_signo}), Fast shutdown initiated')
@@ -67,6 +68,7 @@ def sigshutdown_handler(_signo, _stack_frame):
         logger.error(f"Error syncing to disk: {str(e)}")
     
     sys.exit()
+
 
 def main():
     global datastore

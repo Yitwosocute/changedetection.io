@@ -24,21 +24,21 @@ document.addEventListener('DOMContentLoaded', function() {
     <form class="pure-form" action="{{ url_for('ui.ui_views.form_quick_watch_add', tag=active_tag_uuid) }}" method="POST" id="new-watch-form">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" >
         <fieldset>
-            <legend>Add a new web page change detection watch</legend>
+            <legend>添加新的网页变更监控</legend>
             <div id="watch-add-wrapper-zone">
                     {{ render_nolabel_field(form.url, placeholder="https://...", required=true) }}
-                    {{ render_nolabel_field(form.watch_submit_button, title="Watch this URL!" ) }}
-                    {{ render_nolabel_field(form.edit_and_watch_submit_button, title="Edit first then Watch") }}
+                    {{ render_nolabel_field(form.watch_submit_button, title="开始监控该 URL" ) }}
+                    {{ render_nolabel_field(form.edit_and_watch_submit_button, title="先编辑再监控") }}
             </div>
             <div id="watch-group-tag">
-               {{ render_field(form.tags, value=active_tag.title if active_tag_uuid else '', placeholder="Watch group / tag", class="transparent-field") }}
+               {{ render_field(form.tags, value=active_tag.title if active_tag_uuid else '', placeholder="监控分组 / 标签", class="transparent-field") }}
             </div>
             <div id="quick-watch-processor-type">
                 {{ render_simple_field(form.processor) }}
             </div>
 
         </fieldset>
-        <span style="color:#eee; font-size: 80%;"><img alt="Create a shareable link" style="height: 1em;display:inline-block;" src="{{url_for('static_content', group='images', filename='spread-white.svg')}}" > Tip: You can also add 'shared' watches. <a href="https://github.com/dgtlmoon/changedetection.io/wiki/Sharing-a-Watch">More info</a></span>
+        <span style="color:#eee; font-size: 80%;"><img alt="Create a shareable link" style="height: 1em;display:inline-block;" src="{{url_for('static_content', group='images', filename='spread-white.svg')}}" > 提示：也可以添加“共享”监控。 <a href="https://github.com/dgtlmoon/changedetection.io/wiki/Sharing-a-Watch">了解更多</a></span>
     </form>
 </div>
 <div class="box">
@@ -46,17 +46,17 @@ document.addEventListener('DOMContentLoaded', function() {
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" >
     <input type="hidden" id="op_extradata" name="op_extradata" value="" >
     <div id="checkbox-operations">
-        <button class="pure-button button-secondary button-xsmall"  name="op" value="pause"><i data-feather="pause" style="width: 14px; height: 14px; stroke: white; margin-right: 4px;"></i>Pause</button>
-        <button class="pure-button button-secondary button-xsmall"  name="op" value="unpause"><i data-feather="play" style="width: 14px; height: 14px; stroke: white; margin-right: 4px;"></i>UnPause</button>
-        <button class="pure-button button-secondary button-xsmall"  name="op" value="mute"><i data-feather="volume-x" style="width: 14px; height: 14px; stroke: white; margin-right: 4px;"></i>Mute</button>
-        <button class="pure-button button-secondary button-xsmall"  name="op" value="unmute"><i data-feather="volume-2" style="width: 14px; height: 14px; stroke: white; margin-right: 4px;"></i>UnMute</button>
-        <button class="pure-button button-secondary button-xsmall" name="op" value="recheck"><i data-feather="refresh-cw" style="width: 14px; height: 14px; stroke: white; margin-right: 4px;"></i>Recheck</button>
-        <button class="pure-button button-secondary button-xsmall" name="op" value="assign-tag" id="checkbox-assign-tag"><i data-feather="tag" style="width: 14px; height: 14px; stroke: white; margin-right: 4px;"></i>Tag</button>
-        <button class="pure-button button-secondary button-xsmall" name="op" value="mark-viewed"><i data-feather="eye" style="width: 14px; height: 14px; stroke: white; margin-right: 4px;"></i>Mark viewed</button>
-        <button class="pure-button button-secondary button-xsmall" name="op" value="notification-default"><i data-feather="bell" style="width: 14px; height: 14px; stroke: white; margin-right: 4px;"></i>Use default notification</button>
-        <button class="pure-button button-secondary button-xsmall" name="op" value="clear-errors"><i data-feather="x-circle" style="width: 14px; height: 14px; stroke: white; margin-right: 4px;"></i>Clear errors</button>
-        <button class="pure-button button-secondary button-xsmall" style="background: #dd4242;" name="op" value="clear-history"><i data-feather="trash-2" style="width: 14px; height: 14px; stroke: white; margin-right: 4px;"></i>Clear/reset history</button>
-        <button class="pure-button button-secondary button-xsmall" style="background: #dd4242;" name="op" value="delete"><i data-feather="trash" style="width: 14px; height: 14px; stroke: white; margin-right: 4px;"></i>Delete</button>
+        <button class="pure-button button-secondary button-xsmall"  name="op" value="pause"><i data-feather="pause" style="width: 14px; height: 14px; stroke: white; margin-right: 4px;"></i>暂停</button>
+        <button class="pure-button button-secondary button-xsmall"  name="op" value="unpause"><i data-feather="play" style="width: 14px; height: 14px; stroke: white; margin-right: 4px;"></i>恢复</button>
+        <button class="pure-button button-secondary button-xsmall"  name="op" value="mute"><i data-feather="volume-x" style="width: 14px; height: 14px; stroke: white; margin-right: 4px;"></i>静音</button>
+        <button class="pure-button button-secondary button-xsmall"  name="op" value="unmute"><i data-feather="volume-2" style="width: 14px; height: 14px; stroke: white; margin-right: 4px;"></i>取消静音</button>
+        <button class="pure-button button-secondary button-xsmall" name="op" value="recheck"><i data-feather="refresh-cw" style="width: 14px; height: 14px; stroke: white; margin-right: 4px;"></i>重新检查</button>
+        <button class="pure-button button-secondary button-xsmall" name="op" value="assign-tag" id="checkbox-assign-tag"><i data-feather="tag" style="width: 14px; height: 14px; stroke: white; margin-right: 4px;"></i>标签</button>
+        <button class="pure-button button-secondary button-xsmall" name="op" value="mark-viewed"><i data-feather="eye" style="width: 14px; height: 14px; stroke: white; margin-right: 4px;"></i>标记为已读</button>
+        <button class="pure-button button-secondary button-xsmall" name="op" value="notification-default"><i data-feather="bell" style="width: 14px; height: 14px; stroke: white; margin-right: 4px;"></i>使用默认通知</button>
+        <button class="pure-button button-secondary button-xsmall" name="op" value="clear-errors"><i data-feather="x-circle" style="width: 14px; height: 14px; stroke: white; margin-right: 4px;"></i>清除错误</button>
+        <button class="pure-button button-secondary button-xsmall" style="background: #dd4242;" name="op" value="clear-history"><i data-feather="trash-2" style="width: 14px; height: 14px; stroke: white; margin-right: 4px;"></i>清空/重置历史</button>
+        <button class="pure-button button-secondary button-xsmall" style="background: #dd4242;" name="op" value="delete"><i data-feather="trash" style="width: 14px; height: 14px; stroke: white; margin-right: 4px;"></i>删除</button>
     </div>
     {%- if watches|length >= pagination.per_page -%}
         {{ pagination.info }}
@@ -101,19 +101,19 @@ document.addEventListener('DOMContentLoaded', function() {
                     &nbsp;
                     <a class="{{ 'active '+link_order if sort_attribute == 'notification_muted' else 'inactive' }}" href="{{url_for('watchlist.index', sort='notification_muted', order=link_order, tag=active_tag_uuid)}}"><i data-feather="volume-2" style="vertical-align: bottom; width: 14px; height: 14px;  margin-right: 4px;"></i><span class='arrow {{link_order}}'></span></a>
                 </th>
-                <th><a class="{{ 'active '+link_order if sort_attribute == 'label' else 'inactive' }}" href="{{url_for('watchlist.index', sort='label', order=link_order, tag=active_tag_uuid)}}">Website <span class='arrow {{link_order}}'></span></a></th>
+                <th><a class="{{ 'active '+link_order if sort_attribute == 'label' else 'inactive' }}" href="{{url_for('watchlist.index', sort='label', order=link_order, tag=active_tag_uuid)}}">网站 <span class='arrow {{link_order}}'></span></a></th>
              {%- if any_has_restock_price_processor -%}
                 <th>Restock &amp; Price</th>
              {%- endif -%}
-                <th><a class="{{ 'active '+link_order if sort_attribute == 'last_checked' else 'inactive' }}" href="{{url_for('watchlist.index', sort='last_checked', order=link_order, tag=active_tag_uuid)}}"><span class="hide-on-mobile">Last</span> Checked <span class='arrow {{link_order}}'></span></a></th>
-                <th><a class="{{ 'active '+link_order if sort_attribute == 'last_changed' else 'inactive' }}" href="{{url_for('watchlist.index', sort='last_changed', order=link_order, tag=active_tag_uuid)}}"><span class="hide-on-mobile">Last</span> Changed <span class='arrow {{link_order}}'></span></a></th>
+                <th><a class="{{ 'active '+link_order if sort_attribute == 'last_checked' else 'inactive' }}" href="{{url_for('watchlist.index', sort='last_checked', order=link_order, tag=active_tag_uuid)}}"><span class="hide-on-mobile">最近</span> 检查 <span class='arrow {{link_order}}'></span></a></th>
+                <th><a class="{{ 'active '+link_order if sort_attribute == 'last_changed' else 'inactive' }}" href="{{url_for('watchlist.index', sort='last_changed', order=link_order, tag=active_tag_uuid)}}"><span class="hide-on-mobile">最近</span> 变更 <span class='arrow {{link_order}}'></span></a></th>
                 <th class="empty-cell"></th>
             </tr>
             </thead>
             <tbody>
             {%- if not watches|length -%}
             <tr>
-                <td colspan="{{ cols_required }}" style="text-wrap: wrap;">No website watches configured, please add a URL in the box above, or <a href="{{ url_for('imports.import_page')}}" >import a list</a>.</td>
+                <td colspan="{{ cols_required }}" style="text-wrap: wrap;">还没有监控，请在上方输入 URL，或者 <a href="{{ url_for('imports.import_page')}}" >导入列表</a>。</td>
             </tr>
             {%- endif -%}
 
@@ -144,10 +144,10 @@ document.addEventListener('DOMContentLoaded', function() {
                 <td class="inline checkbox-uuid" ><div><input name="uuids"  type="checkbox" value="{{ watch.uuid}} " > <span class="counter-i">{{ loop.index+pagination.skip }}</span></div></td>
                 <td class="inline watch-controls">
                     <div>
-                    <a class="ajax-op state-off pause-toggle" data-op="pause" href="{{url_for('watchlist.index', op='pause', uuid=watch.uuid, tag=active_tag_uuid)}}"><img src="{{url_for('static_content', group='images', filename='pause.svg')}}" alt="Pause checks" title="Pause checks" class="icon icon-pause" ></a>
-                    <a class="ajax-op state-on pause-toggle"  data-op="pause" style="display: none" href="{{url_for('watchlist.index', op='pause', uuid=watch.uuid, tag=active_tag_uuid)}}"><img src="{{url_for('static_content', group='images', filename='play.svg')}}" alt="UnPause checks" title="UnPause checks" class="icon icon-unpause" ></a>
-                    <a class="ajax-op state-off mute-toggle" data-op="mute" href="{{url_for('watchlist.index', op='mute', uuid=watch.uuid, tag=active_tag_uuid)}}"><img src="{{url_for('static_content', group='images', filename='bell-off.svg')}}" alt="Mute notification" title="Mute notification" class="icon icon-mute" ></a>
-                    <a class="ajax-op state-on mute-toggle" data-op="mute"  style="display: none" href="{{url_for('watchlist.index', op='mute', uuid=watch.uuid, tag=active_tag_uuid)}}"><img src="{{url_for('static_content', group='images', filename='bell-off.svg')}}" alt="UnMute notification" title="UnMute notification" class="icon icon-mute" ></a>
+                    <a class="ajax-op state-off pause-toggle" data-op="pause" href="{{url_for('watchlist.index', op='pause', uuid=watch.uuid, tag=active_tag_uuid)}}"><img src="{{url_for('static_content', group='images', filename='pause.svg')}}" alt="暂停 checks" title="暂停 checks" class="icon icon-pause" ></a>
+                    <a class="ajax-op state-on pause-toggle"  data-op="pause" style="display: none" href="{{url_for('watchlist.index', op='pause', uuid=watch.uuid, tag=active_tag_uuid)}}"><img src="{{url_for('static_content', group='images', filename='play.svg')}}" alt="Un暂停 checks" title="Un暂停 checks" class="icon icon-unpause" ></a>
+                    <a class="ajax-op state-off mute-toggle" data-op="mute" href="{{url_for('watchlist.index', op='mute', uuid=watch.uuid, tag=active_tag_uuid)}}"><img src="{{url_for('static_content', group='images', filename='bell-off.svg')}}" alt="静音 notification" title="静音 notification" class="icon icon-mute" ></a>
+                    <a class="ajax-op state-on mute-toggle" data-op="mute"  style="display: none" href="{{url_for('watchlist.index', op='mute', uuid=watch.uuid, tag=active_tag_uuid)}}"><img src="{{url_for('static_content', group='images', filename='bell-off.svg')}}" alt="Un静音 notification" title="Un静音 notification" class="icon icon-mute" ></a>
                     </div>
                 </td>
 
@@ -233,10 +233,10 @@ document.addEventListener('DOMContentLoaded', function() {
                     <div>
                     {%- set target_attr = ' target="' ~ watch.uuid ~ '"' if datastore.data['settings']['application']['ui'].get('open_diff_in_new_tab') else '' -%}
                     <a href="" class="already-in-queue-button recheck pure-button pure-button-primary" style="display: none;" disabled="disabled">Queued</a>
-                    <a href="{{ url_for('ui.form_watch_checknow', uuid=watch.uuid, tag=request.args.get('tag')) }}" data-op='recheck' class="ajax-op recheck pure-button pure-button-primary">Recheck</a>
-                    <a href="{{ url_for('ui.ui_edit.edit_page', uuid=watch.uuid, tag=active_tag_uuid)}}#general" class="pure-button pure-button-primary">Edit</a>
-                    <a href="{{ url_for('ui.ui_views.diff_history_page', uuid=watch.uuid)}}" {{target_attr}} class="pure-button pure-button-primary history-link" style="display: none;">History</a>
-                    <a href="{{ url_for('ui.ui_views.preview_page', uuid=watch.uuid)}}" {{target_attr}} class="pure-button pure-button-primary preview-link" style="display: none;">Preview</a>
+                    <a href="{{ url_for('ui.form_watch_checknow', uuid=watch.uuid, tag=request.args.get('tag')) }}" data-op='recheck' class="ajax-op recheck pure-button pure-button-primary">重新检查</a>
+                    <a href="{{ url_for('ui.ui_edit.edit_page', uuid=watch.uuid, tag=active_tag_uuid)}}#general" class="pure-button pure-button-primary">编辑</a>
+                    <a href="{{ url_for('ui.ui_views.diff_history_page', uuid=watch.uuid)}}" {{target_attr}} class="pure-button pure-button-primary history-link" style="display: none;">历史</a>
+                    <a href="{{ url_for('ui.ui_views.preview_page', uuid=watch.uuid)}}" {{target_attr}} class="pure-button pure-button-primary preview-link" style="display: none;">预览</a>
                     </div>
                 </td>
             </tr>
@@ -248,18 +248,18 @@ document.addEventListener('DOMContentLoaded', function() {
                 <a href="{{url_for('watchlist.index', with_errors=1, tag=request.args.get('tag')) }}" class="pure-button button-tag button-error">With errors ({{ errored_count }})</a>
             </li>
             <li id="post-list-mark-views" style="display: none;" >
-                <a href="{{url_for('ui.mark_all_viewed',with_errors=request.args.get('with_errors',0)) }}" class="pure-button button-tag " id="mark-all-viewed">Mark all viewed</a>
+                <a href="{{url_for('ui.mark_all_viewed',with_errors=request.args.get('with_errors',0)) }}" class="pure-button button-tag " id="mark-all-viewed">全部标记为已读</a>
             </li>
         {%-  if active_tag_uuid -%}
             <li id="post-list-mark-views-tag">
-                <a href="{{url_for('ui.mark_all_viewed', tag=active_tag_uuid) }}" class="pure-button button-tag " id="mark-all-viewed">Mark all viewed in '{{active_tag.title}}'</a>
+                <a href="{{url_for('ui.mark_all_viewed', tag=active_tag_uuid) }}" class="pure-button button-tag " id="mark-all-viewed">在 '{{active_tag.title}}' 中全部标记为已读</a>
             </li>
         {%-  endif -%}
             <li id="post-list-unread" style="display: none;" >
-                <a href="{{url_for('watchlist.index', unread=1, tag=request.args.get('tag')) }}" class="pure-button button-tag">Unread (<span id="unread-tab-counter">{{ unread_changes_count }}</span>)</a>
+                <a href="{{url_for('watchlist.index', unread=1, tag=request.args.get('tag')) }}" class="pure-button button-tag">未读 (<span id="unread-tab-counter">{{ unread_changes_count }}</span>)</a>
             </li>
             <li>
-               <a href="{{ url_for('ui.form_watch_checknow', tag=active_tag_uuid, with_errors=request.args.get('with_errors',0)) }}" class="pure-button button-tag" id="recheck-all">Recheck
+               <a href="{{ url_for('ui.form_watch_checknow', tag=active_tag_uuid, with_errors=request.args.get('with_errors',0)) }}" class="pure-button button-tag" id="recheck-all">重新检查
                 all {% if active_tag_uuid %}  in '{{active_tag.title}}'{%endif%}</a>
             </li>
             <li>

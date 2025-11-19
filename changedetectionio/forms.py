@@ -735,10 +735,10 @@ class quickWatchForm(Form):
     from . import processors
 
     url = fields.URLField('URL', validators=[validateURL()])
-    tags = StringTagUUID('Group tag', [validators.Optional()])
-    watch_submit_button = SubmitField('Watch', render_kw={"class": "pure-button pure-button-primary"})
-    processor = RadioField(u'Processor', choices=processors.available_processors(), default="text_json_diff")
-    edit_and_watch_submit_button = SubmitField('Edit > Watch', render_kw={"class": "pure-button pure-button-primary"})
+    tags = StringTagUUID('分组标签', [validators.Optional()])
+    watch_submit_button = SubmitField('监控', render_kw={"class": "pure-button pure-button-primary"})
+    processor = RadioField('监控方式', choices=processors.available_processors(), default="text_json_diff")
+    edit_and_watch_submit_button = SubmitField('编辑后监控', render_kw={"class": "pure-button pure-button-primary"})
 
 
 
@@ -783,7 +783,7 @@ class SingleBrowserStep(Form):
 class processor_text_json_diff_form(commonSettingsForm):
 
     url = fields.URLField('URL', validators=[validateURL()])
-    tags = StringTagUUID('Group tag', [validators.Optional()], default='')
+    tags = StringTagUUID('分组标签', [validators.Optional()], default='')
 
     time_between_check = EnhancedFormField(
         TimeBetweenCheckForm,

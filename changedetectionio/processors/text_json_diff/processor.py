@@ -17,7 +17,7 @@ from changedetectionio.processors.magic import guess_stream_type
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-name = 'Webpage Text/HTML, JSON and PDF changes'
+name = '网页文本/HTML、JSON 与 PDF 变更'
 description = 'Detects all text changes where possible'
 
 JSON_FILTER_PREFIXES = ['json:', 'jq:', 'jqraw:']

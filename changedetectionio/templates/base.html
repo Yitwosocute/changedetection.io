@@ -1,12 +1,12 @@
 <!DOCTYPE html>
-<html lang="en" data-darkmode="{{ get_darkmode_state() }}">
+<html lang="zh" data-darkmode="{{ get_darkmode_state() }}">
 
   <head>
     <meta charset="utf-8" >
     <meta name="viewport" content="width=device-width, initial-scale=1.0" >
-    <meta name="description" content="Self hosted website change detection." >
+    <meta name="description" content="自托管的网站变更监控。" >
     <meta name="robots" content="noindex">
-    <title>Change Detection{{extra_title}}</title>
+    <title>网站变更检测{{extra_title}}</title>
     {% if app_rss_token %}
       <link rel="alternate" type="application/rss+xml" title="Changedetection.io » Feed{% if active_tag_uuid %}- {{active_tag.title}}{% endif %}" href="{{ url_for('rss.feed', tag=active_tag_uuid , token=app_rss_token)}}" >
     {% endif %}
@@ -53,13 +53,13 @@
           <a class="pure-menu-heading" href="{{url_for('watchlist.index')}}">
             <strong>Change</strong>Detection.io</a>
         {% endif %}
-        {% if current_diff_url %}
+        {% if current_diff_url and is_safe_valid_url(current_diff_url) %}
           <a class="current-diff-url" href="{{ current_diff_url }}">
             <span style="max-width: 30%; overflow: hidden">{{ current_diff_url }}</span></a>
         {% else %}
           {% if new_version_available and not(has_password and not current_user.is_authenticated) %}
             <span id="new-version-text" class="pure-menu-heading">
-              <a href="https://changedetection.io">A new version is available</a>
+              <a href="https://changedetection.io">有新版本可用</a>
             </span>
           {% endif %}
         {% endif %}
@@ -69,47 +69,47 @@
             {% if not
             current_diff_url %}
               <li class="pure-menu-item">
-                <a href="{{ url_for('tags.tags_overview_page')}}" class="pure-menu-link">GROUPS</a>
+                <a href="{{ url_for('tags.tags_overview_page')}}" class="pure-menu-link">分组</a>
               </li>
               <li class="pure-menu-item">
-                <a href="{{ url_for('settings.settings_page')}}" class="pure-menu-link">SETTINGS</a>
+                <a href="{{ url_for('settings.settings_page')}}" class="pure-menu-link">设置</a>
               </li>
               <li class="pure-menu-item">
-                <a href="{{ url_for('imports.import_page')}}" class="pure-menu-link">IMPORT</a>
+                <a href="{{ url_for('imports.import_page')}}" class="pure-menu-link">导入</a>
               </li>
               <li class="pure-menu-item">
-                <a href="{{ url_for('backups.index')}}" class="pure-menu-link">BACKUPS</a>
+                <a href="{{ url_for('backups.index')}}" class="pure-menu-link">备份</a>
               </li>
             {% else %}
               <li class="pure-menu-item">
-                <a href="{{ url_for('ui.ui_edit.edit_page', uuid=uuid, next='diff') }}" class="pure-menu-link">EDIT</a>
+                <a href="{{ url_for('ui.ui_edit.edit_page', uuid=uuid, next='diff') }}" class="pure-menu-link">编辑</a>
               </li>
             {% endif %}
           {% else %}
             <li class="pure-menu-item">
-              <a class="pure-menu-link" href="https://changedetection.io">Website Change Detection and Notification.</a>
+              <a class="pure-menu-link" href="https://changedetection.io">网站变更检测与通知。</a>
             </li>
           {% endif %}
           {% if current_user.is_authenticated %}
             <li class="pure-menu-item">
-              <a href="{{url_for('logout')}}" class="pure-menu-link">LOG OUT</a>
+              <a href="{{url_for('logout')}}" class="pure-menu-link">退出登录</a>
             </li>
           {% endif %}
           {% if current_user.is_authenticated or not has_password %}
           <li class="pure-menu-item pure-form" id="search-menu-item">
             <!-- We use GET here so it offers people a chance to set bookmarks etc -->
             <form name="searchForm" action="" method="GET">
-              <input id="search-q" class="" name="q" placeholder="URL or Title {% if active_tag_uuid %}in '{{ active_tag.title }}'{% endif %}" required="" type="text" value="">
+              <input id="search-q" class="" name="q" placeholder="URL 或标题 {% if active_tag_uuid %}在 '{{ active_tag.title }}' 中{% endif %}" required="" type="text" value="">
               <input name="tags" type="hidden" value="{% if active_tag_uuid %}{{active_tag_uuid}}{% endif %}">
-              <button class="toggle-button " id="toggle-search" type="button" title="Search, or Use Alt+S Key" >
+              <button class="toggle-button " id="toggle-search" type="button" title="搜索，或使用 Alt+S 快捷键" >
                 {% include "svgs/search-icon.svg" %}
               </button>
             </form>
           </li>
           {% endif %}
           <li class="pure-menu-item">
-            <button class="toggle-button" id ="toggle-light-mode" type="button" title="Toggle Light/Dark Mode">
-              <span class="visually-hidden">Toggle light/dark mode</span>
+            <button class="toggle-button" id ="toggle-light-mode" type="button" title="切换明暗模式">
+              <span class="visually-hidden">切换明暗模式</span>
               <span class="icon-light">
                 {% include "svgs/light-mode-toggle-icon.svg" %}
               </span>
@@ -147,13 +147,13 @@
 
     {% if hosted_sticky %}
       <div class="sticky-tab" id="hosted-sticky">
-        <a href="https://changedetection.io/?ref={{guid}}">Let us host your instance!</a>
+        <a href="https://changedetection.io/?ref={{guid}}">让我们来托管你的实例！</a>
       </div>
     {% endif %}
     {% if left_sticky %}
       <div class="sticky-tab" id="left-sticky">
-        <a href="{{url_for('ui.ui_views.preview_page', uuid=uuid)}}">Show current snapshot</a><br>
-          Visualise <strong>triggers</strong> and <strong>ignored text</strong>
+        <a href="{{url_for('ui.ui_views.preview_page', uuid=uuid)}}">显示当前快照</a><br>
+          可视化 <strong>触发器</strong> 和 <strong>忽略的文本</strong>
       </div>
     {% endif %}
     {% if right_sticky %}
@@ -162,50 +162,49 @@
     <section class="content">
         <div id="overlay">
             <div class="content">
-                <h4>Try our Chrome extension</h4>
+                <h4>试试我们的 Chrome 扩展</h4>
                 <p>
                     <a id="chrome-extension-link"
-                       title="Chrome Extension - Web Page Change Detection with changedetection.io!"
+                       title="Chrome 扩展 - 使用 changedetection.io 监控网页变更！"
                        href="https://chromewebstore.google.com/detail/changedetectionio-website/kefcfmgmlhmankjmnbijimhofdjekbop">
                         <img alt="Chrome store icon" src="{{url_for('static_content', group='images', filename='google-chrome-icon.png')}}">
-                        Chrome Webstore
+                        Chrome 网上应用店
                     </a>
                 </p>
-                Easily add the current web-page from your browser directly into your changedetection.io tool, more great features coming soon!
-                <h4>Changedetection.io needs your support!</h4>
+                只需点击即可把当前网页添加到 changedetection.io，更多功能即将上线！
+                <h4>Changedetection.io 需要你的支持！</h4>
                 <p>
-                    You can help us by supporting changedetection.io on these platforms;
+                    欢迎在以下平台支持 changedetection.io：
                 </p>
                 <p>
                 <ul>
                     <li>
-                        <a href="https://alternativeto.net/software/changedetection-io/about/" title="Web page change detection at alternativeto.net">Rate us at
-                        AlternativeTo.net</a>
+                        <a href="https://alternativeto.net/software/changedetection-io/about/" title="在 alternativeto.net 评价 changedetection.io">在 AlternativeTo.net 为我们评分</a>
                     </li>
                 <li>
-                    <a href="https://github.com/dgtlmoon/changedetection.io" title="Web page change detection on GitHub">Star us on GitHub</a>
+                    <a href="https://github.com/dgtlmoon/changedetection.io" title="在 GitHub 上关注 changedetection.io">在 GitHub 为我们加星</a>
                 </li>
                 <li>
-                    <a rel="nofollow" href="https://twitter.com/change_det_io" title="Web page change detection on Twitter">Follow us at Twitter/X</a>
+                    <a rel="nofollow" href="https://twitter.com/change_det_io" title="在 Twitter 上关注 changedetection.io">在 Twitter/X 上关注我们</a>
                 </li>
                 <li>
-                    <a rel="nofollow" href="https://www.g2.com/products/changedetection-io/reviews" title="Web page change detection reviews at G2">G2 Software reviews</a>
+                    <a rel="nofollow" href="https://www.g2.com/products/changedetection-io/reviews" title="在 G2 上查看 changedetection.io 评价">G2 软件评价</a>
                 </li>
                 <li>
-                    <a rel="nofollow" href="https://www.linkedin.com/company/changedetection-io" title="Visit web page change detection at LinkedIn">Check us out on LinkedIn</a>
+                    <a rel="nofollow" href="https://www.linkedin.com/company/changedetection-io" title="在 LinkedIn 上查看 changedetection.io">在 LinkedIn 上关注我们</a>
                 </li>
                 <li>
-                    And tell your friends and colleagues :)
+                    也欢迎告诉你的朋友和同事 :)
                 </li>
                 </ul>
                 <p>
-                    The more popular changedetection.io is, the more time we can dedicate to adding amazing features!
+                    changedetection.io 越受欢迎，我们就能投入更多时间打造更多功能！
                 </p>
                 <p>
-                    Many thanks :)<br>
+                    非常感谢 :)<br>
                 </p>
                 <p>
-                    <i>changedetection.io team</i>
+                    <i>changedetection.io 团队</i>
                 </p>
             </div>
         </div>
@@ -226,7 +225,7 @@
       {% if session['share-link'] %}
         <ul class="messages with-share-link">
           <li class="message">
-            Share this link:
+            分享此链接：
             <span id="share-link">{{ session['share-link'] }}</span>
             <img style="height: 1em; display: inline-block" src="{{url_for('static_content', group='images', filename='copy.svg')}}" >
           </li>
@@ -236,8 +235,8 @@
     </section>
     <script src="{{url_for('static_content', group='js', filename='toggle-theme.js')}}" defer></script>
 
-    <div id="checking-now-fixed-tab" style="display: none;"><span class="spinner"></span><span>&nbsp;Checking now</span></div>
-    <div id="realtime-conn-error" style="display:none">Real-time updates offline</div>
+    <div id="checking-now-fixed-tab" style="display: none;"><span class="spinner"></span><span>&nbsp;正在检查</span></div>
+    <div id="realtime-conn-error" style="display:none">实时更新已离线</div>
   </body>
 
 </html>
