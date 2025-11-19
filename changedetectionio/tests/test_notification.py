@@ -13,10 +13,10 @@ import base64
 from changedetectionio.notification import (
     default_notification_body,
     default_notification_format,
-    default_notification_title,
-    valid_notification_formats,
+    default_notification_title, valid_notification_formats
 )
-
+from ..diff import HTML_CHANGED_STYLE
+from ..model import USE_SYSTEM_DEFAULT_NOTIFICATION_FORMAT_FOR_WATCH
 
 
 # Hard to just add more live server URLs when one test is already running (I think)
@@ -46,6 +46,14 @@ def test_check_notification(client, live_server, measure_memory_usage):
     )
 
     assert b"Settings updated." in res.data
+
+    res = client.get(url_for("settings.settings_page"))
+    for k,v in valid_notification_formats.items():
+        if k == USE_SYSTEM_DEFAULT_NOTIFICATION_FORMAT_FOR_WATCH:
+            continue
+        assert f'value="{k}"'.encode() in res.data # Should be by key NOT value
+        assert f'value="{v}"'.encode() not in res.data # Should be by key NOT value
+
 
     # When test mode is in BASE_URL env mode, we should see this already configured
     env_base_url = os.getenv('BASE_URL', '').strip()
@@ -101,7 +109,7 @@ def test_check_notification(client, live_server, measure_memory_usage):
                                                    "Diff as Patch: {{diff_patch}}\n"
                                                    ":-)",
                               "notification_screenshot": True,
-                              "notification_format": "Text"}
+                              "notification_format": 'text'}
 
     notification_form_data.update({
         "url": test_url,
@@ -267,7 +275,7 @@ def test_notification_validation(client, live_server, measure_memory_usage):
 #        data={"notification_urls": 'json://localhost/foobar',
 #              "notification_title": "",
 #              "notification_body": "",
-#              "notification_format": "Text",
+#              "notification_format": 'text',
 #              "url": test_url,
 #              "tag": "my tag",
 #              "title": "my title",
@@ -383,7 +391,7 @@ def test_notification_custom_endpoint_and_jinja2(client, live_server, measure_me
         assert 'second: hello world "space"' in notification_headers.lower()
 
 
-    # Should always be automatically detected as JSON content type even when we set it as 'Text' (default)
+    # Should always be automatically detected as JSON content type even when we set it as 'Plain Text' (default)
     assert os.path.isfile("test-datastore/notification-content-type.txt")
     with open("test-datastore/notification-content-type.txt", 'r') as f:
         assert 'application/json' in f.read()
@@ -467,6 +475,25 @@ def test_global_send_test_notification(client, live_server, measure_memory_usage
         # Should come from notification.py default handler when there is no notification body to pull from
         assert 'change detection is cool 网站监测 内容更新了' in x
 
+    ## Check that 'test' catches errors
+    test_notification_url = 'post://akjsdfkjasdkfjasdkfjasdkjfas232323/should-error'
+
+    ######### Test global/system settings
+    res = client.post(
+        url_for("ui.ui_notification.ajax_callback_send_notification_test")+"?mode=global-settings",
+        data={"notification_urls": test_notification_url},
+        follow_redirects=True
+    )
+    assert res.status_code == 400
+    assert (
+        b"No address found" in res.data or
+        b"Name or service not known" in res.data or
+        b"nodename nor servname provided" in res.data or
+        b"Temporary failure in name resolution" in res.data or
+        b"Failed to establish a new connection" in res.data or
+        b"Connection error occurred" in res.data
+    )
+    
     client.get(
         url_for("ui.form_delete", uuid="all"),
         follow_redirects=True
@@ -483,9 +510,8 @@ def test_global_send_test_notification(client, live_server, measure_memory_usage
     assert b"Error: You must have atleast one watch configured for 'test notification' to work" in res.data
 
 
-def _test_color_notifications(client, notification_body_token):
 
-    from changedetectionio.diff import ADDED_STYLE, REMOVED_STYLE
+def _test_color_notifications(client, notification_body_token):
 
     set_original_response()
 
@@ -503,7 +529,7 @@ def _test_color_notifications(client, notification_body_token):
             "application-fetch_backend": "html_requests",
             "application-minutes_between_check": 180,
             "application-notification_body": notification_body_token,
-            "application-notification_format": "HTML Color",
+            "application-notification_format": "htmlcolor",
             "application-notification_urls": test_notification_url,
             "application-notification_title": "New ChangeDetection.io Notification - {{ watch_url }}",
         },
@@ -533,7 +559,8 @@ def _test_color_notifications(client, notification_body_token):
 
     with open("test-datastore/notification.txt", 'r') as f:
         x = f.read()
-        assert f'<span style="{REMOVED_STYLE}">Which is across multiple lines' in x
+        s =  f'<span style="{HTML_CHANGED_STYLE}" role="note" aria-label="Changed text" title="Changed text">Which is across multiple lines'
+        assert s in x
 
 
     client.get(
@@ -541,9 +568,7 @@ def _test_color_notifications(client, notification_body_token):
         follow_redirects=True
     )
 
+# Just checks the format of the colour notifications was correct
 def test_html_color_notifications(client, live_server, measure_memory_usage):
-
-    
     _test_color_notifications(client, '{{diff}}')
     _test_color_notifications(client, '{{diff_full}}')
-    

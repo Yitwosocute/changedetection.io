@@ -1,3 +1,5 @@
+from functools import lru_cache
+
 from loguru import logger
 from typing import List
 import html
@@ -13,7 +15,6 @@ TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.I | re.S)
 META_CS  = re.compile(r'<meta[^>]+charset=["\']?\s*([a-z0-9_\-:+.]+)', re.I)
 META_CT  = re.compile(r'<meta[^>]+http-equiv=["\']?content-type["\']?[^>]*content=["\'][^>]*charset=([a-z0-9_\-:+.]+)', re.I)
 
-
 # 'price' , 'lowPrice', 'highPrice' are usually under here
 # All of those may or may not appear on different websites - I didnt find a way todo case-insensitive searching here
 LD_JSON_PRODUCT_OFFER_SELECTORS = ["json:$..offers", "json:$..Offers"]
@@ -22,9 +23,9 @@ class JSONNotFound(ValueError):
     def __init__(self, msg):
         ValueError.__init__(self, msg)
 
-
 # Doesn't look like python supports forward slash auto enclosure in re.findall
 # So convert it to inline flag "(?i)foobar" type configuration
+@lru_cache(maxsize=100)
 def perl_style_slash_enclosed_regex_to_options(regex):
 
     res = re.search(PERL_STYLE_REGEX, regex, re.IGNORECASE)
@@ -185,8 +186,21 @@ def xpath_filter(xpath_filter, html_content, append_pretty_line_formatting=False
     tree = html.fromstring(bytes(html_content, encoding='utf-8'), parser=parser)
     html_block = ""
 
-    r = elementpath.select(tree, xpath_filter.strip(), namespaces={'re': 'http://exslt.org/regular-expressions'}, parser=XPath3Parser)
-    #@note: //title/text() wont work where <title>CDATA..
+    # Build namespace map for XPath queries
+    namespaces = {'re': 'http://exslt.org/regular-expressions'}
+
+    # Handle default namespace in documents (common in RSS/Atom feeds, but can occur in any XML)
+    # XPath spec: unprefixed element names have no namespace, not the default namespace
+    # Solution: Register the default namespace with empty string prefix in elementpath
+    # This is primarily for RSS/Atom feeds but works for any XML with default namespace
+    if hasattr(tree, 'nsmap') and tree.nsmap and None in tree.nsmap:
+        # Register the default namespace with empty string prefix for elementpath
+        # This allows //title to match elements in the default namespace
+        namespaces[''] = tree.nsmap[None]
+
+    r = elementpath.select(tree, xpath_filter.strip(), namespaces=namespaces, parser=XPath3Parser)
+    #@note: //title/text() now works with default namespaces (fixed by registering '' prefix)
+    #@note: //title/text() wont work where <title>CDATA.. (use cdata_in_document_to_text first)
 
     if type(r) != list:
         r = [r]
@@ -221,8 +235,19 @@ def xpath1_filter(xpath_filter, html_content, append_pretty_line_formatting=Fals
     tree = html.fromstring(bytes(html_content, encoding='utf-8'), parser=parser)
     html_block = ""
 
-    r = tree.xpath(xpath_filter.strip(), namespaces={'re': 'http://exslt.org/regular-expressions'})
-    #@note: //title/text() wont work where <title>CDATA..
+    # Build namespace map for XPath queries
+    namespaces = {'re': 'http://exslt.org/regular-expressions'}
+
+    # NOTE: lxml's native xpath() does NOT support empty string prefix for default namespace
+    # For documents with default namespace (RSS/Atom feeds), users must use:
+    #   - local-name(): //*[local-name()='title']/text()
+    #   - Or use xpath_filter (not xpath1_filter) which supports default namespaces
+    # XPath spec: unprefixed element names have no namespace, not the default namespace
+
+    r = tree.xpath(xpath_filter.strip(), namespaces=namespaces)
+    #@note: xpath1 (lxml) does NOT automatically handle default namespaces
+    #@note: Use //*[local-name()='element'] or switch to xpath_filter for default namespace support
+    #@note: //title/text() wont work where <title>CDATA.. (use cdata_in_document_to_text first)
 
     for element in r:
         # When there's more than 1 match, then add the suffix to separate each line
@@ -408,6 +433,9 @@ def strip_ignore_text(content, wordlist, mode="content"):
     ignored_lines = []
 
     for k in wordlist:
+        # Skip empty strings to avoid matching everything
+        if not k or not k.strip():
+            continue
         # Is it a regex?
         res = re.search(PERL_STYLE_REGEX, k, re.IGNORECASE)
         if res:

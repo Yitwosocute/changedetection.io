@@ -370,7 +370,7 @@ def test_api_watch_PUT_update(client, live_server, measure_memory_usage):
 
     ######################################################
 
-    # HTTP PUT try a field that doenst exist
+    # HTTP PUT try a field that doesn't exist
 
     # HTTP PUT an update
     res = client.put(
@@ -383,6 +383,17 @@ def test_api_watch_PUT_update(client, live_server, measure_memory_usage):
     # Message will come from `flask_expects_json`
     assert b'Additional properties are not allowed' in res.data
 
+
+    # Try a XSS URL
+    res = client.put(
+        url_for("watch", uuid=watch_uuid),
+        headers={'x-api-key': api_key, 'content-type': 'application/json'},
+        data=json.dumps({
+            'url': 'javascript:alert(document.domain)'
+        }),
+    )
+    assert res.status_code == 400
+
     # Cleanup everything
     delete_all_watches(client)
 
@@ -394,7 +405,8 @@ def test_api_import(client, live_server, measure_memory_usage):
     res = client.post(
         url_for("import") + "?tag=import-test",
         data='https://website1.com\r\nhttps://website2.com',
-        headers={'x-api-key': api_key, 'content-type': 'text/plain'},
+        # We removed  'content-type': 'text/plain', the Import API should assume this if none is set #3547 #3542
+        headers={'x-api-key': api_key},
         follow_redirects=True
     )
 

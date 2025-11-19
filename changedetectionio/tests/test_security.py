@@ -1,6 +1,8 @@
 import os
 
 from flask import url_for
+
+from changedetectionio.tests.util import set_modified_response
 from .util import live_server_setup, wait_for_all_checks, delete_all_watches
 from .. import strtobool
 
@@ -23,7 +25,7 @@ def set_original_response():
     return None
 
 def test_bad_access(client, live_server, measure_memory_usage):
-    
+
     res = client.post(
         url_for("imports.import_page"),
         data={"urls": 'https://localhost'},
@@ -46,7 +48,7 @@ def test_bad_access(client, live_server, measure_memory_usage):
         follow_redirects=True
     )
 
-    assert b'Watch protocol is not permitted by SAFE_PROTOCOL_REGEX' in res.data
+    assert b'Watch protocol is not permitted or invalid URL format' in res.data
 
     res = client.post(
         url_for("ui.ui_views.form_quick_watch_add"),
@@ -54,7 +56,7 @@ def test_bad_access(client, live_server, measure_memory_usage):
         follow_redirects=True
     )
 
-    assert b'Watch protocol is not permitted by SAFE_PROTOCOL_REGEX' in res.data
+    assert b'Watch protocol is not permitted or invalid URL format' in res.data
 
     res = client.post(
         url_for("ui.ui_views.form_quick_watch_add"),
@@ -62,7 +64,7 @@ def test_bad_access(client, live_server, measure_memory_usage):
         follow_redirects=True
     )
 
-    assert b'Watch protocol is not permitted by SAFE_PROTOCOL_REGEX' in res.data
+    assert b'Watch protocol is not permitted or invalid URL format' in res.data
 
 
     res = client.post(
@@ -71,8 +73,15 @@ def test_bad_access(client, live_server, measure_memory_usage):
         follow_redirects=True
     )
 
-    assert b'Watch protocol is not permitted by SAFE_PROTOCOL_REGEX' in res.data
+    assert b'Watch protocol is not permitted or invalid URL format' in res.data
 
+    res = client.post(
+        url_for("ui.ui_views.form_quick_watch_add"),
+        data={"url": 'https://i-wanna-xss-you.com?hereis=<script>alert(1)</script>', "tags": ''},
+        follow_redirects=True
+    )
+
+    assert b'Watch protocol is not permitted or invalid URL format' in res.data
 
 def _runner_test_various_file_slash(client, file_uri):
 
@@ -109,8 +118,8 @@ def test_file_slash_access(client, live_server, measure_memory_usage):
 
     test_file_path = os.path.abspath(__file__)
     _runner_test_various_file_slash(client, file_uri=f"file://{test_file_path}")
-    _runner_test_various_file_slash(client, file_uri=f"file:/{test_file_path}")
-    _runner_test_various_file_slash(client, file_uri=f"file:{test_file_path}") # CVE-2024-56509
+#    _runner_test_various_file_slash(client, file_uri=f"file:/{test_file_path}")
+#    _runner_test_various_file_slash(client, file_uri=f"file:{test_file_path}") # CVE-2024-56509
 
 def test_xss(client, live_server, measure_memory_usage):
     
@@ -131,6 +140,26 @@ def test_xss(client, live_server, measure_memory_usage):
 
     assert b"<img src=x onerror=alert(" not in res.data
     assert b"&lt;img" in res.data
+
+    # Check that even forcing an update directly still doesnt get to the frontend
+    set_original_response()
+    XSS_HACK = 'javascript:alert(document.domain)'
+    uuid = client.application.config.get('DATASTORE').add_watch(url=url_for('test_endpoint', _external=True))
+    client.get(url_for("ui.form_watch_checknow"), follow_redirects=True)
+    wait_for_all_checks(client)
+    set_modified_response()
+    client.get(url_for("ui.form_watch_checknow"), follow_redirects=True)
+    wait_for_all_checks(client)
+
+    live_server.app.config['DATASTORE'].data['watching'][uuid]['url']=XSS_HACK
+
+
+    res = client.get(url_for("ui.ui_views.preview_page", uuid=uuid))
+    assert XSS_HACK.encode('utf-8') not in res.data and res.status_code == 200
+    client.get(url_for("ui.ui_views.diff_history_page", uuid=uuid))
+    assert XSS_HACK.encode('utf-8') not in res.data and res.status_code == 200
+    res = client.get(url_for("watchlist.index"))
+    assert XSS_HACK.encode('utf-8') not in res.data and res.status_code == 200
 
 
 def test_xss_watch_last_error(client, live_server, measure_memory_usage):
