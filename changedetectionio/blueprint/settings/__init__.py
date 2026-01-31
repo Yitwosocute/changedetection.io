@@ -5,6 +5,7 @@ from zoneinfo import ZoneInfo, available_timezones
 import secrets
 import flask_login
 from flask import Blueprint, render_template, request, redirect, url_for, flash
+from flask_babel import gettext
 
 from changedetectionio.store import ChangeDetectionStore
 from changedetectionio.auth_decorator import login_optionally_required
@@ -17,6 +18,12 @@ def construct_blueprint(datastore: ChangeDetectionStore):
     @login_optionally_required
     def settings_page():
         from changedetectionio import forms
+        from changedetectionio.pluggy_interface import (
+            get_plugin_settings_tabs,
+            load_plugin_settings,
+            save_plugin_settings
+        )
+
 
         default = deepcopy(datastore.data['settings'])
         if datastore.proxy_list is not None:
@@ -54,7 +61,7 @@ def construct_blueprint(datastore: ChangeDetectionStore):
                 # SALTED_PASS means the password is "locked" to what we set in the Env var
                 if not os.getenv("SALTED_PASS", False):
                     datastore.remove_password()
-                    flash("Password protection removed.", 'notice')
+                    flash(gettext("Password protection removed."), 'notice')
                     flask_login.logout_user()
                     return redirect(url_for('settings.settings_page'))
 
@@ -71,14 +78,20 @@ def construct_blueprint(datastore: ChangeDetectionStore):
                 # Handle dynamic worker count adjustment
                 old_worker_count = datastore.data['settings']['requests'].get('workers', 1)
                 new_worker_count = form.data['requests'].get('workers', 1)
-                
+
                 datastore.data['settings']['requests'].update(form.data['requests'])
-                
+
                 # Adjust worker count if it changed
                 if new_worker_count != old_worker_count:
                     from changedetectionio import worker_handler
                     from changedetectionio.flask_app import update_q, notification_q, app, datastore as ds
-                    
+
+                    # Check CPU core availability and warn if worker count is high
+                    cpu_count = os.cpu_count()
+                    if cpu_count and new_worker_count >= (cpu_count * 0.9):
+                        flash(gettext("Warning: Worker count ({}) is close to or exceeds available CPU cores ({})").format(
+                            new_worker_count, cpu_count), 'warning')
+
                     result = worker_handler.adjust_async_worker_count(
                         new_count=new_worker_count,
                         update_q=update_q,
@@ -86,32 +99,68 @@ def construct_blueprint(datastore: ChangeDetectionStore):
                         app=app,
                         datastore=ds
                     )
-                    
+
                     if result['status'] == 'success':
-                        flash(f"Worker count adjusted: {result['message']}", 'notice')
+                        flash(gettext("Worker count adjusted: {}").format(result['message']), 'notice')
                     elif result['status'] == 'not_supported':
-                        flash("Dynamic worker adjustment not supported for sync workers", 'warning')
+                        flash(gettext("Dynamic worker adjustment not supported for sync workers"), 'warning')
                     elif result['status'] == 'error':
-                        flash(f"Error adjusting workers: {result['message']}", 'error')
+                        flash(gettext("Error adjusting workers: {}").format(result['message']), 'error')
 
                 if not os.getenv("SALTED_PASS", False) and len(form.application.form.password.encrypted_password):
                     datastore.data['settings']['application']['password'] = form.application.form.password.encrypted_password
                     datastore.needs_write_urgent = True
-                    flash("Password protection enabled.", 'notice')
+                    flash(gettext("Password protection enabled."), 'notice')
                     flask_login.logout_user()
                     return redirect(url_for('watchlist.index'))
 
                 datastore.needs_write_urgent = True
-                flash("Settings updated.")
+
+                # Also save plugin settings from the same form submission
+                plugin_tabs_list = get_plugin_settings_tabs()
+                for tab in plugin_tabs_list:
+                    plugin_id = tab['plugin_id']
+                    form_class = tab['form_class']
+
+                    # Instantiate plugin form with POST data
+                    plugin_form = form_class(formdata=request.form)
+
+                    # Save plugin settings (validation is optional for plugins)
+                    if plugin_form.data:
+                        save_plugin_settings(datastore.datastore_path, plugin_id, plugin_form.data)
+
+                flash(gettext("Settings updated."))
 
             else:
-                flash("An error occurred, please see below.", "error")
+                flash(gettext("An error occurred, please see below."), "error")
 
         # Convert to ISO 8601 format, all date/time relative events stored as UTC time
         utc_time = datetime.now(ZoneInfo("UTC")).isoformat()
 
+        # Get active plugins
+        from changedetectionio.pluggy_interface import get_active_plugins
+        import sys
+        active_plugins = get_active_plugins()
+        python_version = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+
+        # Get plugin settings tabs and instantiate forms
+        plugin_tabs = get_plugin_settings_tabs()
+        plugin_forms = {}
+
+        for tab in plugin_tabs:
+            plugin_id = tab['plugin_id']
+            form_class = tab['form_class']
+
+            # Load existing settings
+            settings = load_plugin_settings(datastore.datastore_path, plugin_id)
+
+            # Instantiate the form with existing settings
+            plugin_forms[plugin_id] = form_class(data=settings)
+
         output = render_template("settings.html",
+                                active_plugins=active_plugins,
                                 api_key=datastore.data['settings']['application'].get('api_access_token'),
+                                python_version=python_version,
                                 available_timezones=sorted(available_timezones()),
                                 emailprefix=os.getenv('NOTIFICATION_MAIL_BUTTON_PREFIX', False),
                                 extra_notification_token_placeholder_info=datastore.get_unique_notification_token_placeholders_available(),
@@ -121,6 +170,8 @@ def construct_blueprint(datastore: ChangeDetectionStore):
                                 settings_application=datastore.data['settings']['application'],
                                 timezone_default_config=datastore.data['settings']['application'].get('scheduler_timezone_default'),
                                 utc_time=utc_time,
+                                plugin_tabs=plugin_tabs,
+                                plugin_forms=plugin_forms,
                                 )
 
         return output
@@ -131,7 +182,7 @@ def construct_blueprint(datastore: ChangeDetectionStore):
         secret = secrets.token_hex(16)
         datastore.data['settings']['application']['api_access_token'] = secret
         datastore.needs_write_urgent = True
-        flash("API Key was regenerated.")
+        flash(gettext("API Key was regenerated."))
         return redirect(url_for('settings.settings_page')+'#api')
         
     @settings_blueprint.route("/notification-logs", methods=['GET'])
@@ -141,5 +192,33 @@ def construct_blueprint(datastore: ChangeDetectionStore):
         output = render_template("notification-log.html",
                                logs=notification_debug_log if len(notification_debug_log) else ["Notification logs are empty - no notifications sent yet."])
         return output
+
+    @settings_blueprint.route("/toggle-all-paused", methods=['GET'])
+    @login_optionally_required
+    def toggle_all_paused():
+        current_state = datastore.data['settings']['application'].get('all_paused', False)
+        datastore.data['settings']['application']['all_paused'] = not current_state
+        datastore.needs_write_urgent = True
+
+        if datastore.data['settings']['application']['all_paused']:
+            flash(gettext("Automatic scheduling paused - checks will not be queued."), 'notice')
+        else:
+            flash(gettext("Automatic scheduling resumed - checks will be queued normally."), 'notice')
+
+        return redirect(url_for('watchlist.index'))
+
+    @settings_blueprint.route("/toggle-all-muted", methods=['GET'])
+    @login_optionally_required
+    def toggle_all_muted():
+        current_state = datastore.data['settings']['application'].get('all_muted', False)
+        datastore.data['settings']['application']['all_muted'] = not current_state
+        datastore.needs_write_urgent = True
+
+        if datastore.data['settings']['application']['all_muted']:
+            flash(gettext("All notifications muted."), 'notice')
+        else:
+            flash(gettext("All notifications unmuted."), 'notice')
+
+        return redirect(url_for('watchlist.index'))
 
     return settings_blueprint

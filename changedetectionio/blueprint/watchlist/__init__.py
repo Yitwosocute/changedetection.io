@@ -2,10 +2,11 @@ import os
 import time
 
 from flask import Blueprint, request, make_response, render_template, redirect, url_for, flash, session
-from flask_login import current_user
 from flask_paginate import Pagination, get_page_parameter
+from flask_babel import gettext as _
 
 from changedetectionio import forms
+from changedetectionio import processors
 from changedetectionio.store import ChangeDetectionStore
 from changedetectionio.auth_decorator import login_optionally_required
 
@@ -73,7 +74,10 @@ def construct_blueprint(datastore: ChangeDetectionStore, update_q, queuedWatchMe
 
         pagination = Pagination(page=page,
                                 total=total_count,
-                                per_page=datastore.data['settings']['application'].get('pager_size', 50), css_framework="semantic")
+                                per_page=datastore.data['settings']['application'].get('pager_size', 50),
+                                css_framework="semantic",
+                                display_msg=_('displaying <b>{start} - {end}</b> {record_name} in total <b>{total}</b>'),
+                                record_name=_('records'))
 
         sorted_tags = sorted(datastore.data['settings']['application'].get('tags').items(), key=lambda x: x[1]['title'])
 
@@ -84,13 +88,19 @@ def construct_blueprint(datastore: ChangeDetectionStore, update_q, queuedWatchMe
             app_rss_token=datastore.data['settings']['application'].get('rss_access_token'),
             datastore=datastore,
             errored_count=errored_count,
+            extra_classes='has-queue' if not update_q.empty() else '',
             form=form,
+            generate_tag_colors=processors.generate_processor_badge_colors,
             guid=datastore.data['app_guid'],
             has_proxies=datastore.proxy_list,
             hosted_sticky=os.getenv("SALTED_PASS", False) == False,
             now_time_server=round(time.time()),
             pagination=pagination,
-            queued_uuids=[q_uuid.item['uuid'] for q_uuid in update_q.queue],
+            processor_badge_css=processors.get_processor_badge_css(),
+            processor_badge_texts=processors.get_processor_badge_texts(),
+            processor_descriptions=processors.get_processor_descriptions(),
+            queue_size=update_q.qsize(),
+            queued_uuids=update_q.get_queued_uuids(),
             search_q=request.args.get('q', '').strip(),
             sort_attribute=request.args.get('sort') if request.args.get('sort') else request.cookies.get('sort'),
             sort_order=request.args.get('order') if request.args.get('order') else request.cookies.get('order'),

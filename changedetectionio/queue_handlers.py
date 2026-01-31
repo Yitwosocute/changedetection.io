@@ -69,7 +69,7 @@ class RecheckPriorityQueue:
             # Emit signals
             self._emit_put_signals(item)
             
-            logger.debug(f"Successfully queued item: {self._get_item_uuid(item)}")
+            logger.trace(f"Successfully queued item: {self._get_item_uuid(item)}")
             return True
             
         except Exception as e:
@@ -86,25 +86,29 @@ class RecheckPriorityQueue:
     
     def get(self, block: bool = True, timeout: Optional[float] = None):
         """Thread-safe sync get with priority ordering"""
+        import queue
         try:
             # Wait for notification
             self.sync_q.get(block=block, timeout=timeout)
-            
+
             # Get highest priority item
             with self._lock:
                 if not self._priority_items:
                     logger.critical(f"CRITICAL: Queue notification received but no priority items available")
                     raise Exception("Priority queue inconsistency")
                 item = heapq.heappop(self._priority_items)
-            
+
             # Emit signals
             self._emit_get_signals()
-            
+
             logger.debug(f"Successfully retrieved item: {self._get_item_uuid(item)}")
             return item
-            
+
+        except queue.Empty:
+            # Queue is empty with timeout - expected behavior, re-raise without logging
+            raise
         except Exception as e:
-            logger.critical(f"CRITICAL: Failed to get item from queue: {str(e)}")
+            # Re-raise without logging - caller (worker) will handle and log appropriately
             raise
     
     # ASYNC INTERFACE (for workers)
@@ -141,20 +145,20 @@ class RecheckPriorityQueue:
         try:
             # Wait for notification
             await self.async_q.get()
-            
+
             # Get highest priority item
             with self._lock:
                 if not self._priority_items:
                     logger.critical(f"CRITICAL: Async queue notification received but no priority items available")
                     raise Exception("Priority queue inconsistency")
                 item = heapq.heappop(self._priority_items)
-            
+
             # Emit signals
             self._emit_get_signals()
-            
+
             logger.debug(f"Successfully async retrieved item: {self._get_item_uuid(item)}")
             return item
-            
+
         except Exception as e:
             logger.critical(f"CRITICAL: Failed to async get item from queue: {str(e)}")
             raise
@@ -172,7 +176,16 @@ class RecheckPriorityQueue:
     def empty(self) -> bool:
         """Check if queue is empty"""
         return self.qsize() == 0
-    
+
+    def get_queued_uuids(self) -> list:
+        """Get list of all queued UUIDs efficiently with single lock"""
+        try:
+            with self._lock:
+                return [item.item['uuid'] for item in self._priority_items if hasattr(item, 'item') and 'uuid' in item.item]
+        except Exception as e:
+            logger.critical(f"CRITICAL: Failed to get queued UUIDs: {str(e)}")
+            return []
+
     def close(self):
         """Close the janus queue"""
         try:
@@ -348,21 +361,31 @@ class NotificationQueue:
     Simple wrapper around janus with bulletproof error handling.
     """
     
-    def __init__(self, maxsize: int = 0):
+    def __init__(self, maxsize: int = 0, datastore=None):
         try:
             self._janus_queue = janus.Queue(maxsize=maxsize)
             # BOTH interfaces required - see class docstring for why
             self.sync_q = self._janus_queue.sync_q   # Flask routes, threads
             self.async_q = self._janus_queue.async_q # Async workers
             self.notification_event_signal = signal('notification_event')
+            self.datastore = datastore  # For checking all_muted setting
             logger.debug("NotificationQueue initialized successfully")
         except Exception as e:
             logger.critical(f"CRITICAL: Failed to initialize NotificationQueue: {str(e)}")
             raise
+
+    def set_datastore(self, datastore):
+        """Set datastore reference after initialization (for circular dependency handling)"""
+        self.datastore = datastore
     
     def put(self, item: Dict[str, Any], block: bool = True, timeout: Optional[float] = None):
         """Thread-safe sync put with signal emission"""
         try:
+            # Check if all notifications are muted
+            if self.datastore and self.datastore.data['settings']['application'].get('all_muted', False):
+                logger.debug(f"Notification blocked - all notifications are muted: {item.get('uuid', 'unknown')}")
+                return False
+
             self.sync_q.put(item, block=block, timeout=timeout)
             self._emit_notification_signal(item)
             logger.debug(f"Successfully queued notification: {item.get('uuid', 'unknown')}")
@@ -374,6 +397,11 @@ class NotificationQueue:
     async def async_put(self, item: Dict[str, Any]):
         """Pure async put with signal emission"""
         try:
+            # Check if all notifications are muted
+            if self.datastore and self.datastore.data['settings']['application'].get('all_muted', False):
+                logger.debug(f"Notification blocked - all notifications are muted: {item.get('uuid', 'unknown')}")
+                return False
+
             await self.async_q.put(item)
             self._emit_notification_signal(item)
             logger.debug(f"Successfully async queued notification: {item.get('uuid', 'unknown')}")

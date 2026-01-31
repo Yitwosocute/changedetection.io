@@ -66,20 +66,20 @@ def do_test(client, live_server, make_test_use_extra_browser=False):
     wait_for_all_checks(client)
 
     res = client.get(
-        url_for("ui.ui_views.preview_page", uuid="first"),
+        url_for("ui.ui_preview.preview_page", uuid="first"),
         follow_redirects=True
     )
     assert b'cool it works' in res.data
 
 
 # Requires playwright to be installed
-def test_request_via_custom_browser_url(client, live_server, measure_memory_usage):
+def test_request_via_custom_browser_url(client, live_server, measure_memory_usage, datastore_path):
    #  live_server_setup(live_server) # Setup on conftest per function
     # We do this so we can grep the logs of the custom container and see if the request actually went through that container
     do_test(client, live_server, make_test_use_extra_browser=True)
 
 
-def test_request_not_via_custom_browser_url(client, live_server, measure_memory_usage):
+def test_request_not_via_custom_browser_url(client, live_server, measure_memory_usage, datastore_path):
    #  live_server_setup(live_server) # Setup on conftest per function
     # We do this so we can grep the logs of the custom container and see if the request actually went through that container
     do_test(client, live_server, make_test_use_extra_browser=False)

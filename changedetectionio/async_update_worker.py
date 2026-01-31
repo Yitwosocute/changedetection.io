@@ -1,3 +1,4 @@
+from blinker import signal
 from .processors.exceptions import ProcessorException
 import changedetectionio.content_fetchers.exceptions as content_fetchers_exceptions
 from changedetectionio.processors.text_json_diff.processor import FilterNotFoundInResponse
@@ -7,7 +8,7 @@ from changedetectionio.flask_app import watch_check_update
 import asyncio
 import importlib
 import os
-import queue
+import sys
 import time
 
 from loguru import logger
@@ -15,38 +16,67 @@ from loguru import logger
 # Async version of update_worker
 # Processes jobs from AsyncSignalPriorityQueue instead of threaded queue
 
-async def async_update_worker(worker_id, q, notification_q, app, datastore):
+IN_PYTEST = "pytest" in sys.modules or "PYTEST_CURRENT_TEST" in os.environ
+DEFER_SLEEP_TIME_ALREADY_QUEUED = 0.3 if IN_PYTEST else 10.0
+
+async def async_update_worker(worker_id, q, notification_q, app, datastore, executor=None):
     """
     Async worker function that processes watch check jobs from the queue.
-    
+
     Args:
         worker_id: Unique identifier for this worker
         q: AsyncSignalPriorityQueue containing jobs to process
         notification_q: Standard queue for notifications
         app: Flask application instance
         datastore: Application datastore
+        executor: ThreadPoolExecutor for queue operations (optional)
+
+    Returns:
+        "restart" if worker should restart, "shutdown" for clean exit
     """
     # Set a descriptive name for this task
     task = asyncio.current_task()
     if task:
         task.set_name(f"async-worker-{worker_id}")
-    
-    logger.info(f"Starting async worker {worker_id}")
-    
+
+    # Read restart policy from environment
+    max_jobs = int(os.getenv("WORKER_MAX_JOBS", "10"))
+    max_runtime_seconds = int(os.getenv("WORKER_MAX_RUNTIME", "3600"))  # 1 hour default
+
+    jobs_processed = 0
+    start_time = time.time()
+
+    logger.info(f"Starting async worker {worker_id} (max_jobs={max_jobs}, max_runtime={max_runtime_seconds}s)")
+
     while not app.config.exit.is_set():
         update_handler = None
         watch = None
 
         try:
-            # Use native janus async interface - no threads needed!
-            queued_item_data = await asyncio.wait_for(q.async_get(), timeout=1.0)
-            
+            # Use sync interface via run_in_executor since each worker has its own event loop
+            loop = asyncio.get_event_loop()
+            queued_item_data = await asyncio.wait_for(
+                loop.run_in_executor(executor, q.get, True, 1.0),  # block=True, timeout=1.0
+                timeout=1.5
+            )
+
         except asyncio.TimeoutError:
-            # No jobs available, continue loop
+            # No jobs available - check if we should restart based on time while idle
+            runtime = time.time() - start_time
+            if runtime >= max_runtime_seconds:
+                logger.info(f"Worker {worker_id} idle and reached max runtime ({runtime:.0f}s), restarting")
+                return "restart"
             continue
         except Exception as e:
+            # Handle expected Empty exception from queue timeout
+            import queue
+            if isinstance(e, queue.Empty):
+                # Queue is empty, normal behavior - just continue
+                continue
+
+            # Unexpected exception - log as critical
             logger.critical(f"CRITICAL: Worker {worker_id} failed to get queue item: {type(e).__name__}: {e}")
-            
+
             # Log queue health for debugging
             try:
                 queue_size = q.qsize()
@@ -54,16 +84,32 @@ async def async_update_worker(worker_id, q, notification_q, app, datastore):
                 logger.critical(f"CRITICAL: Worker {worker_id} queue health - size: {queue_size}, empty: {is_empty}")
             except Exception as health_e:
                 logger.critical(f"CRITICAL: Worker {worker_id} queue health check failed: {health_e}")
-            
+
             await asyncio.sleep(0.1)
             continue
-        
+
         uuid = queued_item_data.item.get('uuid')
-        fetch_start_time = round(time.time())
-        
-        # Mark this UUID as being processed
+
+        # RACE CONDITION FIX: Atomically claim this UUID for processing
         from changedetectionio import worker_handler
-        worker_handler.set_uuid_processing(uuid, processing=True)
+        from changedetectionio.queuedWatchMetaData import PrioritizedItem
+
+        # Try to claim the UUID atomically - prevents duplicate processing
+        if not worker_handler.claim_uuid_for_processing(uuid, worker_id):
+            # Already being processed by another worker
+            logger.trace(f"Worker {worker_id} detected UUID {uuid} already being processed - deferring")
+
+            # Sleep to avoid tight loop and give the other worker time to finish
+            await asyncio.sleep(DEFER_SLEEP_TIME_ALREADY_QUEUED)
+
+            # Re-queue with lower priority so it gets checked again after current processing finishes
+            deferred_priority = max(1000, queued_item_data.priority * 10)
+            deferred_item = PrioritizedItem(priority=deferred_priority, item=queued_item_data.item)
+            worker_handler.queue_item_async_safe(q, deferred_item, silent=True)
+            logger.debug(f"Worker {worker_id} re-queued UUID {uuid} for subsequent check")
+            continue
+
+        fetch_start_time = round(time.time())
         
         try:
             if uuid in list(datastore.data['watching'].keys()) and datastore.data['watching'][uuid].get('url'):
@@ -87,9 +133,8 @@ async def async_update_worker(worker_id, q, notification_q, app, datastore):
                     processor = watch.get('processor', 'text_json_diff')
 
                     # Init a new 'difference_detection_processor'
-                    processor_module_name = f"changedetectionio.processors.{processor}.processor"
                     try:
-                        processor_module = importlib.import_module(processor_module_name)
+                        processor_module = importlib.import_module(f"changedetectionio.processors.{processor}.processor")
                     except ModuleNotFoundError as e:
                         print(f"Processor module '{processor}' not found.")
                         raise e
@@ -97,11 +142,20 @@ async def async_update_worker(worker_id, q, notification_q, app, datastore):
                     update_handler = processor_module.perform_site_check(datastore=datastore,
                                                                          watch_uuid=uuid)
 
+                    update_signal = signal('watch_small_status_comment')
+                    update_signal.send(watch_uuid=uuid, status="Fetching page..")
+
                     # All fetchers are now async, so call directly
                     await update_handler.call_browser()
 
-                    # Run change detection (this is synchronous)
-                    changed_detected, update_obj, contents = update_handler.run_changedetection(watch=watch)
+                    # Run change detection in executor to avoid blocking event loop
+                    # This includes CPU-intensive operations like HTML parsing (lxml/inscriptis)
+                    # which can take 2-10ms and cause GIL contention across workers
+                    loop = asyncio.get_event_loop()
+                    changed_detected, update_obj, contents = await loop.run_in_executor(
+                        executor,
+                        lambda: update_handler.run_changedetection(watch=watch)
+                    )
 
                 except PermissionError as e:
                     logger.critical(f"File permission error updating file, watch: {uuid}")
@@ -111,8 +165,10 @@ async def async_update_worker(worker_id, q, notification_q, app, datastore):
                 except ProcessorException as e:
                     if e.screenshot:
                         watch.save_screenshot(screenshot=e.screenshot)
+                        e.screenshot = None  # Free memory immediately
                     if e.xpath_data:
                         watch.save_xpath_data(data=e.xpath_data)
+                        e.xpath_data = None  # Free memory immediately
                     datastore.update_watch(uuid=uuid, update_obj={'last_error': e.message})
                     process_changedetection_results = False
 
@@ -132,9 +188,11 @@ async def async_update_worker(worker_id, q, notification_q, app, datastore):
 
                     if e.screenshot:
                         watch.save_screenshot(screenshot=e.screenshot, as_error=True)
+                        e.screenshot = None  # Free memory immediately
 
                     if e.xpath_data:
                         watch.save_xpath_data(data=e.xpath_data)
+                        e.xpath_data = None  # Free memory immediately
                         
                     process_changedetection_results = False
 
@@ -153,8 +211,10 @@ async def async_update_worker(worker_id, q, notification_q, app, datastore):
 
                     if e.screenshot:
                         watch.save_screenshot(screenshot=e.screenshot, as_error=True)
+                        e.screenshot = None  # Free memory immediately
                     if e.xpath_data:
                         watch.save_xpath_data(data=e.xpath_data, as_error=True)
+                        e.xpath_data = None  # Free memory immediately
                     if e.page_text:
                         watch.save_error_text(contents=e.page_text)
 
@@ -171,9 +231,11 @@ async def async_update_worker(worker_id, q, notification_q, app, datastore):
                     # Filter wasnt found, but we should still update the visual selector so that they can have a chance to set it up again
                     if e.screenshot:
                         watch.save_screenshot(screenshot=e.screenshot)
+                        e.screenshot = None  # Free memory immediately
 
                     if e.xpath_data:
                         watch.save_xpath_data(data=e.xpath_data)
+                        e.xpath_data = None  # Free memory immediately
 
                     # Only when enabled, send the notification
                     if watch.get('filter_failure_notification_send', False):
@@ -265,6 +327,7 @@ async def async_update_worker(worker_id, q, notification_q, app, datastore):
                     err_text = "Error running JS Actions - Page request - "+e.message
                     if e.screenshot:
                         watch.save_screenshot(screenshot=e.screenshot, as_error=True)
+                        e.screenshot = None  # Free memory immediately
                     datastore.update_watch(uuid=uuid, update_obj={'last_error': err_text,
                                                                 'last_check_status': e.status_code})
                     process_changedetection_results = False
@@ -276,6 +339,7 @@ async def async_update_worker(worker_id, q, notification_q, app, datastore):
 
                     if e.screenshot:
                         watch.save_screenshot(screenshot=e.screenshot, as_error=True)
+                        e.screenshot = None  # Free memory immediately
 
                     datastore.update_watch(uuid=uuid, update_obj={'last_error': err_text,
                                                                 'last_check_status': e.status_code,
@@ -309,6 +373,7 @@ async def async_update_worker(worker_id, q, notification_q, app, datastore):
                 if not datastore.data['watching'].get(uuid):
                     continue
 
+                logger.debug(f"Processing watch UUID: {uuid} - xpath_data length returned {len(update_handler.xpath_data) if update_handler.xpath_data else 'empty.'}")
                 if process_changedetection_results:
                     try:
                         datastore.update_watch(uuid=uuid, update_obj=update_obj)
@@ -316,9 +381,17 @@ async def async_update_worker(worker_id, q, notification_q, app, datastore):
                         if changed_detected or not watch.history_n:
                             if update_handler.screenshot:
                                 watch.save_screenshot(screenshot=update_handler.screenshot)
+                                # Free screenshot memory immediately after saving
+                                update_handler.screenshot = None
+                                if hasattr(update_handler, 'fetcher') and hasattr(update_handler.fetcher, 'screenshot'):
+                                    update_handler.fetcher.screenshot = None
 
                             if update_handler.xpath_data:
                                 watch.save_xpath_data(data=update_handler.xpath_data)
+                                # Free xpath data memory
+                                update_handler.xpath_data = None
+                                if hasattr(update_handler, 'fetcher') and hasattr(update_handler.fetcher, 'xpath_data'):
+                                    update_handler.fetcher.xpath_data = None
 
                             # Ensure unique timestamp for history
                             if watch.newest_history_key and int(fetch_start_time) == int(watch.newest_history_key):
@@ -326,7 +399,7 @@ async def async_update_worker(worker_id, q, notification_q, app, datastore):
                                 fetch_start_time += 1
                                 await asyncio.sleep(1)
 
-                            watch.save_history_text(contents=contents,
+                            watch.save_history_blob(contents=contents,
                                                     timestamp=int(fetch_start_time),
                                                     snapshot_id=update_obj.get('previous_md5', 'none'))
 
@@ -353,12 +426,15 @@ async def async_update_worker(worker_id, q, notification_q, app, datastore):
                 count = watch.get('check_count', 0) + 1
 
                 # Always record page title (used in notifications, and can change even when the content is the same)
-                try:
-                    page_title = html_tools.extract_title(data=update_handler.fetcher.content)
-                    logger.debug(f"UUID: {uuid} Page <title> is '{page_title}'")
-                    datastore.update_watch(uuid=uuid, update_obj={'page_title': page_title})
-                except Exception as e:
-                    logger.warning(f"UUID: {uuid} Exception when extracting <title> - {str(e)}")
+                if update_obj.get('content-type') and 'html' in update_obj.get('content-type'):
+                    try:
+                        page_title = html_tools.extract_title(data=update_handler.fetcher.content)
+                        if page_title:
+                            page_title = page_title.strip()[:2000]
+                            logger.debug(f"UUID: {uuid} Page <title> is '{page_title}'")
+                            datastore.update_watch(uuid=uuid, update_obj={'page_title': page_title})
+                    except Exception as e:
+                        logger.warning(f"UUID: {uuid} Exception when extracting <title> - {str(e)}")
 
                 # Record server header
                 try:
@@ -382,6 +458,20 @@ async def async_update_worker(worker_id, q, notification_q, app, datastore):
                     update_handler.fetcher.clear_content()
                     logger.debug(f"Cleared fetcher content for UUID {uuid}")
 
+                # Explicitly delete update_handler to free all references
+                if update_handler:
+                    del update_handler
+                    update_handler = None
+
+                # Force aggressive memory cleanup after clearing
+                import gc
+                gc.collect()
+                try:
+                    import ctypes
+                    ctypes.CDLL('libc.so.6').malloc_trim(0)
+                except Exception:
+                    pass
+
         except Exception as e:
             logger.error(f"Worker {worker_id} unexpected error processing {uuid}: {e}")
             logger.error(f"Worker {worker_id} traceback:", exc_info=True)
@@ -394,8 +484,13 @@ async def async_update_worker(worker_id, q, notification_q, app, datastore):
             # Always cleanup - this runs whether there was an exception or not
             if uuid:
                 try:
-                    # Mark UUID as no longer being processed
-                    worker_handler.set_uuid_processing(uuid, processing=False)
+                    if update_handler and hasattr(update_handler, 'fetcher') and update_handler.fetcher:
+                        await update_handler.fetcher.quit(watch=watch)
+                except Exception as e:
+                    logger.error(f"Exception while cleaning/quit after calling browser: {e}")
+                try:
+                    # Release UUID from processing (thread-safe)
+                    worker_handler.release_uuid_from_processing(uuid, worker_id=worker_id)
                     
                     # Send completion signal
                     if watch:
@@ -424,16 +519,35 @@ async def async_update_worker(worker_id, q, notification_q, app, datastore):
                     # 3. GC can't collect the object anyway (still referenced by datastore)
                     # 4. It would just cause confusion
 
+                    # Force garbage collection after cleanup
+                    import gc
+                    gc.collect()
+
                     logger.debug(f"Worker {worker_id} completed watch {uuid} in {time.time()-fetch_start_time:.2f}s")
                 except Exception as cleanup_error:
                     logger.error(f"Worker {worker_id} error during cleanup: {cleanup_error}")
-            
+
+            del(uuid)
+
             # Brief pause before continuing to avoid tight error loops (only on error)
             if 'e' in locals():
                 await asyncio.sleep(1.0)
             else:
                 # Small yield for normal completion
                 await asyncio.sleep(0.01)
+
+            # Job completed - increment counter and check restart conditions
+            jobs_processed += 1
+            runtime = time.time() - start_time
+
+            # Check if we should restart (only when idle, between jobs)
+            should_restart_jobs = jobs_processed >= max_jobs
+            should_restart_time = runtime >= max_runtime_seconds
+
+            if should_restart_jobs or should_restart_time:
+                reason = f"{jobs_processed} jobs" if should_restart_jobs else f"{runtime:.0f}s runtime"
+                logger.info(f"Worker {worker_id} restarting after {reason} ({jobs_processed} jobs, {runtime:.0f}s runtime)")
+                return "restart"
 
         # Check if we should exit
         if app.config.exit.is_set():
@@ -442,9 +556,11 @@ async def async_update_worker(worker_id, q, notification_q, app, datastore):
     # Check if we're in pytest environment - if so, be more gentle with logging
     import sys
     in_pytest = "pytest" in sys.modules or "PYTEST_CURRENT_TEST" in os.environ
-    
+
     if not in_pytest:
         logger.info(f"Worker {worker_id} shutting down")
+
+    return "shutdown"
 
 
 def cleanup_error_artifacts(uuid, datastore):

@@ -41,7 +41,7 @@ def get_openapi_spec():
         # Possibly for pip3 packages
         spec_path = os.path.join(os.path.dirname(__file__), '../docs/api-spec.yaml')
 
-    with open(spec_path, 'r') as f:
+    with open(spec_path, 'r', encoding='utf-8') as f:
         spec_dict = yaml.safe_load(f)
     _openapi_spec = OpenAPI.from_dict(spec_dict)
     return _openapi_spec
@@ -51,6 +51,7 @@ def validate_openapi_request(operation_id):
     def decorator(f):
         @functools.wraps(f)
         def wrapper(*args, **kwargs):
+            from werkzeug.exceptions import BadRequest
             try:
                 # Skip OpenAPI validation for GET requests since they don't have request bodies
                 if request.method.upper() != 'GET':
@@ -61,7 +62,6 @@ def validate_openapi_request(operation_id):
                     openapi_request = FlaskOpenAPIRequest(request)
                     result = spec.unmarshal_request(openapi_request)
                     if result.errors:
-                        from werkzeug.exceptions import BadRequest
                         error_details = []
                         for error in result.errors:
                             error_details.append(str(error))
@@ -78,7 +78,7 @@ def validate_openapi_request(operation_id):
     return decorator
 
 # Import all API resources
-from .Watch import Watch, WatchHistory, WatchSingleHistory, CreateWatch, WatchFavicon
+from .Watch import Watch, WatchHistory, WatchSingleHistory, WatchHistoryDiff, CreateWatch, WatchFavicon
 from .Tags import Tags, Tag
 from .Import import Import
 from .SystemInfo import SystemInfo

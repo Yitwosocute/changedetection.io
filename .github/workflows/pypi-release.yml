@@ -7,7 +7,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v5
+    - uses: actions/checkout@v6
     - name: Set up Python
       uses: actions/setup-python@v6
       with:
@@ -21,7 +21,7 @@ jobs:
     - name: Build a binary wheel and a source tarball
       run: python3 -m build
     - name: Store the distribution packages
-      uses: actions/upload-artifact@v5
+      uses: actions/upload-artifact@v6
       with:
         name: python-package-distributions
         path: dist/
@@ -34,7 +34,7 @@ jobs:
     - build
     steps:
     - name: Download all the dists
-      uses: actions/download-artifact@v6
+      uses: actions/download-artifact@v7
       with:
         name: python-package-distributions
         path: dist/
@@ -61,8 +61,8 @@ jobs:
         
         # --- API test ---
         # This also means that the docs/api-spec.yml was shipped and could be read
-        test -f /tmp/url-watches.json
-        API_KEY=$(jq -r '.. | .api_access_token? // empty' /tmp/url-watches.json)
+        test -f /tmp/changedetection.json
+        API_KEY=$(jq -r '.. | .api_access_token? // empty' /tmp/changedetection.json)
         echo Test API KEY is $API_KEY
         curl -X POST "http://127.0.0.1:10000/api/v1/watch" \
           -H "x-api-key: ${API_KEY}" \
@@ -93,7 +93,7 @@ jobs:
 
     steps:
     - name: Download all the dists
-      uses: actions/download-artifact@v6
+      uses: actions/download-artifact@v7
       with:
         name: python-package-distributions
         path: dist/

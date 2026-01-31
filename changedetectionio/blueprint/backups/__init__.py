@@ -3,6 +3,7 @@ import glob
 import threading
 
 from flask import Blueprint, render_template, send_from_directory, flash, url_for, redirect, abort
+from flask_babel import gettext
 import os
 
 from changedetectionio.store import ChangeDetectionStore
@@ -26,11 +27,23 @@ def create_backup(datastore_path, watches: dict):
                          compression=zipfile.ZIP_DEFLATED,
                          compresslevel=8) as zipObj:
 
-        # Add the index
-        zipObj.write(os.path.join(datastore_path, "url-watches.json"), arcname="url-watches.json")
+        # Add the settings file (supports both formats)
+        # New format: changedetection.json
+        changedetection_json = os.path.join(datastore_path, "changedetection.json")
+        if os.path.isfile(changedetection_json):
+            zipObj.write(changedetection_json, arcname="changedetection.json")
+            logger.debug("Added changedetection.json to backup")
 
-        # Add the flask app secret
-        zipObj.write(os.path.join(datastore_path, "secret.txt"), arcname="secret.txt")
+        # Legacy format: url-watches.json (for backward compatibility)
+        url_watches_json = os.path.join(datastore_path, "url-watches.json")
+        if os.path.isfile(url_watches_json):
+            zipObj.write(url_watches_json, arcname="url-watches.json")
+            logger.debug("Added url-watches.json to backup")
+
+        # Add the flask app secret (if it exists)
+        secret_file = os.path.join(datastore_path, "secret.txt")
+        if os.path.isfile(secret_file):
+            zipObj.write(secret_file, arcname="secret.txt")
 
         # Add any data in the watch data directory.
         for uuid, w in watches.items():
@@ -82,19 +95,24 @@ def construct_blueprint(datastore: ChangeDetectionStore):
     @backups_blueprint.route("/request-backup", methods=['GET'])
     def request_backup():
         if any(thread.is_alive() for thread in backup_threads):
-            flash("A backup is already running, check back in a few minutes", "error")
+            flash(gettext("A backup is already running, check back in a few minutes"), "error")
             return redirect(url_for('backups.index'))
 
         if len(find_backups()) > int(os.getenv("MAX_NUMBER_BACKUPS", 100)):
-            flash("Maximum number of backups reached, please remove some", "error")
+            flash(gettext("Maximum number of backups reached, please remove some"), "error")
             return redirect(url_for('backups.index'))
 
-        # Be sure we're written fresh
-        datastore.sync_to_json()
-        zip_thread = threading.Thread(target=create_backup, args=(datastore.datastore_path, datastore.data.get("watching")))
+        # Be sure we're written fresh - force immediate save using abstract method
+        datastore.force_save_all()
+        zip_thread = threading.Thread(
+            target=create_backup,
+            args=(datastore.datastore_path, datastore.data.get("watching")),
+            daemon=True,
+            name="BackupCreator"
+        )
         zip_thread.start()
         backup_threads.append(zip_thread)
-        flash("Backup building in background, check back in a few minutes.")
+        flash(gettext("Backup building in background, check back in a few minutes."))
 
         return redirect(url_for('backups.index'))
 
@@ -157,7 +175,7 @@ def construct_blueprint(datastore: ChangeDetectionStore):
         for backup in backups:
             os.unlink(backup)
 
-        flash("Backups were deleted.")
+        flash(gettext("Backups were deleted."))
 
         return redirect(url_for('backups.index'))
 

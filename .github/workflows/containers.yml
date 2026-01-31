@@ -39,11 +39,19 @@ jobs:
     # Or if we are in a tagged release scenario.
     if: ${{ github.event.workflow_run.conclusion == 'success' }} || ${{ github.event.release.tag_name }} != ''
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - name: Set up Python 3.11
         uses: actions/setup-python@v6
         with:
           python-version: 3.11
+
+      - name: Cache pip packages
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
 
       - name: Install dependencies
         run: |
@@ -85,16 +93,27 @@ jobs:
           driver-opts: image=moby/buildkit:master
 
       # master branch -> :dev container tag
+      - name: Docker meta :dev
+        if: ${{ github.ref == 'refs/heads/master' && github.event_name != 'release' }}
+        uses: docker/metadata-action@v5
+        id: meta_dev
+        with:
+          images: |
+            ${{ secrets.DOCKER_HUB_USERNAME }}/changedetection.io
+            ghcr.io/${{ github.repository }}
+          tags: |
+            type=raw,value=dev
+
       - name: Build and push :dev
         id: docker_build
-        if: ${{ github.ref }} == "refs/heads/master"
+        if: ${{ github.ref == 'refs/heads/master' && github.event_name != 'release' }}
         uses: docker/build-push-action@v6
         with:
           context: ./
           file: ./Dockerfile
           push: true
-          tags: |
-            ${{ secrets.DOCKER_HUB_USERNAME }}/changedetection.io:dev,ghcr.io/${{ github.repository }}:dev
+          tags: ${{ steps.meta_dev.outputs.tags }}
+          labels: ${{ steps.meta_dev.outputs.labels }}
           platforms: linux/amd64,linux/arm64,linux/arm/v7,linux/arm/v8
           cache-from: type=gha
           cache-to: type=gha,mode=max
@@ -133,6 +152,7 @@ jobs:
           file: ./Dockerfile
           push: true
           tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
           platforms: linux/amd64,linux/arm64,linux/arm/v7,linux/arm/v8
           cache-from: type=gha
           cache-to: type=gha,mode=max

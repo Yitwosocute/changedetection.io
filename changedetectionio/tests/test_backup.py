@@ -8,13 +8,11 @@ import re
 import time
 
 
-def test_backup(client, live_server, measure_memory_usage):
+def test_backup(client, live_server, measure_memory_usage, datastore_path):
    #  live_server_setup(live_server) # Setup on conftest per function
 
-    set_original_response()
+    set_original_response(datastore_path=datastore_path)
 
-    # Give the endpoint time to spin up
-    time.sleep(1)
 
     # Add our URL to the import page
     res = client.post(
@@ -31,7 +29,7 @@ def test_backup(client, live_server, measure_memory_usage):
         url_for("backups.request_backup"),
         follow_redirects=True
     )
-    time.sleep(2)
+    time.sleep(4)
 
     res = client.get(
         url_for("backups.index"),
@@ -55,11 +53,21 @@ def test_backup(client, live_server, measure_memory_usage):
 
     backup = ZipFile(io.BytesIO(res.data))
     l = backup.namelist()
-    uuid4hex = re.compile('^[a-f0-9]{8}-?[a-f0-9]{4}-?4[a-f0-9]{3}-?[89ab][a-f0-9]{3}-?[a-f0-9]{12}.*txt', re.I)
-    newlist = list(filter(uuid4hex.match, l))  # Read Note below
 
+    # Check for UUID-based txt files (history and snapshot)
+    uuid4hex_txt = re.compile('^[a-f0-9]{8}-?[a-f0-9]{4}-?4[a-f0-9]{3}-?[89ab][a-f0-9]{3}-?[a-f0-9]{12}.*txt', re.I)
+    txt_files = list(filter(uuid4hex_txt.match, l))
     # Should be two txt files in the archive (history and the snapshot)
-    assert len(newlist) == 2
+    assert len(txt_files) == 2
+
+    # Check for watch.json files (new format)
+    uuid4hex_json = re.compile('^[a-f0-9]{8}-?[a-f0-9]{4}-?4[a-f0-9]{3}-?[89ab][a-f0-9]{3}-?[a-f0-9]{12}/watch\.json$', re.I)
+    json_files = list(filter(uuid4hex_json.match, l))
+    # Should be one watch.json file in the archive (the imported watch)
+    assert len(json_files) == 1, f"Expected 1 watch.json file, found {len(json_files)}: {json_files}"
+
+    # Check for changedetection.json (settings file)
+    assert 'changedetection.json' in l, "changedetection.json should be in backup"
 
     # Get the latest one
     res = client.get(

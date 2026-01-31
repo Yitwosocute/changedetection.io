@@ -1,6 +1,7 @@
 from os import getenv
+from copy import deepcopy
 
-from changedetectionio.blueprint.rss import RSS_FORMAT_TYPES
+from changedetectionio.blueprint.rss import RSS_FORMAT_TYPES, RSS_CONTENT_FORMAT_DEFAULT
 
 from changedetectionio.notification import (
     default_notification_body,
@@ -36,6 +37,8 @@ class model(dict):
                 },
                 'application': {
                     # Custom notification content
+                    'all_paused': False,
+                    'all_muted': False,
                     'api_access_token_enabled': True,
                     'base_url' : None,
                     'empty_pages_are_a_change': False,
@@ -45,6 +48,7 @@ class model(dict):
                     'global_subtractive_selectors': [],
                     'ignore_whitespace': True,
                     'ignore_status_codes': False, #@todo implement, as ternary.
+                    'ssim_threshold': '0.96',  # Default SSIM threshold for screenshot comparison
                     'notification_body': default_notification_body,
                     'notification_format': default_notification_format,
                     'notification_title': default_notification_title,
@@ -53,7 +57,10 @@ class model(dict):
                     'password': False,
                     'render_anchor_tag_content': False,
                     'rss_access_token': None,
-                    'rss_content_format': RSS_FORMAT_TYPES[0][0],
+                    'rss_content_format': RSS_CONTENT_FORMAT_DEFAULT,
+                    'rss_template_type': 'system_default',
+                    'rss_template_override': None,
+                    'rss_diff_length': 5,
                     'rss_hide_muted_watches': True,
                     'rss_reader_mode': False,
                     'scheduler_timezone_default': None,  # Default IANA timezone name
@@ -74,12 +81,13 @@ class model(dict):
 
     def __init__(self, *arg, **kw):
         super(model, self).__init__(*arg, **kw)
-        self.update(self.base_config)
+        # CRITICAL: deepcopy to avoid sharing mutable objects between instances
+        self.update(deepcopy(self.base_config))
 
 
 def parse_headers_from_text_file(filepath):
     headers = {}
-    with open(filepath, 'r') as f:
+    with open(filepath, 'r', encoding='utf-8') as f:
         for l in f.readlines():
             l = l.strip()
             if not l.startswith('#') and ':' in l:

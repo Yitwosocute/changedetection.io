@@ -5,7 +5,7 @@ from flask import url_for
 from .util import live_server_setup, wait_for_all_checks
 
 # test pages with http://username@password:foobar.com/ work
-def test_basic_auth(client, live_server, measure_memory_usage):
+def test_basic_auth(client, live_server, measure_memory_usage, datastore_path):
    #  live_server_setup(live_server) # Setup on conftest per function
 
 
@@ -26,7 +26,7 @@ def test_basic_auth(client, live_server, measure_memory_usage):
 
     wait_for_all_checks(client)
     res = client.get(
-        url_for("ui.ui_views.preview_page", uuid="first"),
+        url_for("ui.ui_preview.preview_page", uuid="first"),
         follow_redirects=True
     )
 

@@ -4,25 +4,25 @@ import time
 from flask import url_for
 from urllib.request import urlopen
 from .util import set_original_response, set_modified_response, live_server_setup, wait_for_all_checks
+from ..diff import ADDED_STYLE
 
 sleep_time_for_fetch_thread = 3
 
+def test_check_basic_change_detection_functionality_source(client, live_server, measure_memory_usage, datastore_path):
+    set_original_response(datastore_path=datastore_path)
 
-
-def test_check_basic_change_detection_functionality_source(client, live_server, measure_memory_usage):
-    set_original_response()
     test_url = 'source:'+url_for('test_endpoint', _external=True)
     # Add our URL to the import page
     uuid = client.application.config.get('DATASTORE').add_watch(url=test_url)
     client.get(url_for("ui.form_watch_checknow"), follow_redirects=True)
 
-    time.sleep(sleep_time_for_fetch_thread)
+    wait_for_all_checks(client)
 
     #####################
 
     # Check HTML conversion detected and workd
     res = client.get(
-        url_for("ui.ui_views.preview_page", uuid="first"),
+        url_for("ui.ui_preview.preview_page", uuid="first"),
         follow_redirects=True
     )
 
@@ -30,7 +30,7 @@ def test_check_basic_change_detection_functionality_source(client, live_server, 
     assert b'foobar-detection' in res.data
 
     # Make a change
-    set_modified_response()
+    set_modified_response(datastore_path=datastore_path)
 
     # Force recheck
     res = client.get(url_for("ui.form_watch_checknow"), follow_redirects=True)
@@ -43,17 +43,18 @@ def test_check_basic_change_detection_functionality_source(client, live_server, 
     assert b'has-unread-changes' in res.data
 
     res = client.get(
-        url_for("ui.ui_views.diff_history_page", uuid="first"),
+        url_for("ui.ui_diff.diff_history_page", uuid="first"),
         follow_redirects=True
     )
-
-    assert b'&lt;title&gt;modified head title' in res.data
-
-
+    # With diff-match-patch, HTML tags are properly tokenized and excluded from diff spans
+    # Only "modified" is shown as added, while <head> and <title> tags remain unchanged
+    assert b'aria-label="Changed into" title="Changed into">' in res.data
+    assert b'&lt;title&gt;modified head title'
 
 # `subtractive_selectors` should still work in `source:` type requests
-def test_check_ignore_elements(client, live_server, measure_memory_usage):
-    set_original_response()
+def test_check_ignore_elements(client, live_server, measure_memory_usage, datastore_path):
+    set_original_response(datastore_path=datastore_path)
+
     time.sleep(1)
     test_url = 'source:'+url_for('test_endpoint', _external=True)
     # Add our URL to the import page
@@ -74,7 +75,7 @@ def test_check_ignore_elements(client, live_server, measure_memory_usage):
     time.sleep(sleep_time_for_fetch_thread)
 
     res = client.get(
-        url_for("ui.ui_views.preview_page", uuid="first"),
+        url_for("ui.ui_preview.preview_page", uuid="first"),
         follow_redirects=True
     )
     assert b'foobar-detection' not in res.data

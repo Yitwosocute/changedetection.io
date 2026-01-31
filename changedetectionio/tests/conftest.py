@@ -5,12 +5,11 @@ from threading import Thread
 
 import pytest
 import arrow
-from changedetectionio import changedetection_app
 from changedetectionio import store
 import os
 import sys
-from loguru import logger
 
+from changedetectionio.flask_app import init_app_secret, changedetection_app
 from changedetectionio.tests.util import live_server_setup, new_live_server_setup
 
 # https://github.com/pallets/flask/blob/1.1.2/examples/tutorial/tests/test_auth.py
@@ -87,7 +86,6 @@ def measure_memory_usage(request):
 def cleanup(datastore_path):
     import glob
     # Unlink test output files
-
     for g in ["*.txt", "*.json", "*.pdf"]:
         files = glob.glob(os.path.join(datastore_path, g))
         for f in files:
@@ -97,34 +95,138 @@ def cleanup(datastore_path):
             if os.path.isfile(f):
                 os.unlink(f)
 
-@pytest.fixture(scope='function', autouse=True)
-def prepare_test_function(live_server):
+def pytest_addoption(parser):
+    """Add custom command-line options for pytest.
 
+    Provides --datastore-path option for specifying custom datastore location.
+    Note: Cannot use -d short option as it's reserved by pytest for debug mode.
+    """
+    parser.addoption(
+        "--datastore-path",
+        action="store",
+        default=None,
+        help="Custom datastore path for tests"
+    )
+
+@pytest.fixture(scope='session')
+def datastore_path(tmp_path_factory, request):
+    """Provide datastore path unique to this worker.
+
+    Supports custom path via --datastore-path/-d flag (mirrors main app).
+
+    CRITICAL for xdist isolation:
+    - Each WORKER gets its own directory
+    - Tests on same worker run SEQUENTIALLY and cleanup between tests
+    - No subdirectories needed since tests don't overlap on same worker
+    - Example: /tmp/test-datastore-gw0/ for worker gw0
+    """
+    # Check for custom path first (mirrors main app's -d flag)
+    custom_path = request.config.getoption("--datastore-path")
+    if custom_path:
+        # Ensure the directory exists
+        os.makedirs(custom_path, exist_ok=True)
+        logger.info(f"Using custom datastore path: {custom_path}")
+        return custom_path
+
+    # Otherwise use default tmp_path_factory logic
+    worker_id = getattr(request.config, 'workerinput', {}).get('workerid', 'master')
+    if worker_id == 'master':
+        path = tmp_path_factory.mktemp("test-datastore")
+    else:
+        path = tmp_path_factory.mktemp(f"test-datastore-{worker_id}")
+    return str(path)
+
+
+@pytest.fixture(scope='function', autouse=True)
+def prepare_test_function(live_server, datastore_path):
+    """Prepare each test with complete isolation.
+
+    CRITICAL for xdist per-test isolation:
+    - Reuses the SAME datastore instance (so blueprint references stay valid)
+    - Clears all watches and state for a clean slate
+    - First watch will get uuid="first"
+    """
     routes = [rule.rule for rule in live_server.app.url_map.iter_rules()]
     if '/test-random-content-endpoint' not in routes:
         logger.debug("Setting up test URL routes")
         new_live_server_setup(live_server)
 
+    # CRITICAL: Point app to THIS test's unique datastore directory
+    live_server.app.config['TEST_DATASTORE_PATH'] = datastore_path
+
+    # CRITICAL: Get datastore and stop it from writing stale data
+    datastore = live_server.app.config.get('DATASTORE')
+
+    # Clear the queue before starting the test to prevent state leakage
+    from changedetectionio.flask_app import update_q
+    while not update_q.empty():
+        try:
+            update_q.get_nowait()
+        except:
+            break
+
+    # Prevent background thread from writing during cleanup/reload
+    datastore.needs_write = False
+    datastore.needs_write_urgent = False
+
+    # CRITICAL: Clean up any files from previous tests
+    # This ensures a completely clean directory
+    cleanup(datastore_path)
+
+    # CRITICAL: Reload the EXISTING datastore instead of creating a new one
+    # This keeps blueprint references valid (they capture datastore at construction)
+    # reload_state() completely resets the datastore to a clean state
+
+    # Reload state with clean data (no default watches)
+    datastore.reload_state(
+        datastore_path=datastore_path,
+        include_default_watches=False,
+        version_tag=datastore.data.get('version_tag', '0.0.0')
+    )
+    live_server.app.secret_key = init_app_secret(datastore_path)
+    logger.debug(f"prepare_test_function: Reloaded datastore at {hex(id(datastore))}")
+    logger.debug(f"prepare_test_function: Path {datastore.datastore_path}")
 
     yield
-    # Then cleanup/shutdown
-    live_server.app.config['DATASTORE'].data['watching']={}
-    time.sleep(0.3)
-    live_server.app.config['DATASTORE'].data['watching']={}
+
+    # Cleanup: Clear watches and queue after test
+    try:
+        from changedetectionio.flask_app import update_q
+
+        # Clear the queue to prevent leakage to next test
+        while not update_q.empty():
+            try:
+                update_q.get_nowait()
+            except:
+                break
+
+        datastore.data['watching'] = {}
+        datastore.needs_write = True
+    except Exception as e:
+        logger.warning(f"Error during datastore cleanup: {e}")
+
+
+# So the app can also know which test name it was
+@pytest.fixture(autouse=True)
+def set_test_name(request):
+  """Automatically set TEST_NAME env var for every test"""
+  test_name = request.node.name
+  os.environ['PYTEST_CURRENT_TEST'] = test_name
+  yield
+  # Cleanup if needed
 
 
 @pytest.fixture(scope='session')
-def app(request):
-    """Create application for the tests."""
-    datastore_path = "./test-datastore"
+def app(request, datastore_path):
+    """Create application once per worker (session).
 
+    Note: Actual per-test isolation is handled by:
+    - prepare_test_function() recreates datastore and cleans directory
+    - All tests on same worker use same directory (cleaned between tests)
+    """
     # So they don't delay in fetching
     os.environ["MINIMUM_SECONDS_RECHECK_TIME"] = "0"
-    try:
-        os.mkdir(datastore_path)
-    except FileExistsError:
-        pass
-
+    logger.debug(f"Testing with datastore_path={datastore_path}")
     cleanup(datastore_path)
 
     app_config = {'datastore_path': datastore_path, 'disable_checkver' : True}
@@ -147,19 +249,24 @@ def app(request):
     # Disable CSRF while running tests
     app.config['WTF_CSRF_ENABLED'] = False
     app.config['STOP_THREADS'] = True
+    # Store datastore_path so Flask routes can access it
+    app.config['TEST_DATASTORE_PATH'] = datastore_path
 
     def teardown():
+        import threading
+        import time
+
         # Stop all threads and services
         datastore.stop_thread = True
         app.config.exit.set()
-        
+
         # Shutdown workers gracefully before loguru cleanup
         try:
             from changedetectionio import worker_handler
             worker_handler.shutdown_workers()
         except Exception:
             pass
-            
+
         # Stop socket server threads
         try:
             from changedetectionio.flask_app import socketio_server
@@ -167,17 +274,41 @@ def app(request):
                 socketio_server.shutdown()
         except Exception:
             pass
-        
-        # Give threads a moment to finish their shutdown
-        import time
-        time.sleep(0.1)
-        
+
+        # Get all active threads before cleanup
+        main_thread = threading.main_thread()
+        active_threads = [t for t in threading.enumerate() if t != main_thread and t.is_alive()]
+
+        # Wait for non-daemon threads to finish (with timeout)
+        timeout = 2.0  # 2 seconds max wait
+        start_time = time.time()
+
+        for thread in active_threads:
+            if not thread.daemon:
+                remaining_time = timeout - (time.time() - start_time)
+                if remaining_time > 0:
+                    logger.debug(f"Waiting for non-daemon thread to finish: {thread.name}")
+                    thread.join(timeout=remaining_time)
+                    if thread.is_alive():
+                        logger.warning(f"Thread {thread.name} did not finish in time")
+
+        # Give daemon threads a moment to finish their current work
+        time.sleep(0.2)
+
+        # Log any threads still running
+        remaining_threads = [t for t in threading.enumerate() if t != main_thread and t.is_alive()]
+        if remaining_threads:
+            logger.debug(f"Threads still running after teardown: {[t.name for t in remaining_threads]}")
+
         # Remove all loguru handlers to prevent "closed file" errors
         logger.remove()
-        
+
         # Cleanup files
         cleanup(app_config['datastore_path'])
 
        
     request.addfinalizer(teardown)
     yield app
+
+
+
